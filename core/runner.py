@@ -82,7 +82,20 @@ class Runner:
         await page.goto(login_url, wait_until="networkidle")
         await page.fill('input[name="username"], input[type="text"]', t.username)
         await page.fill('input[name="password"], input[type="password"]', t.password)
-        await page.get_by_role("button").filter(has_text=re.compile(r"登入|Login|登 录")).first.click()
+        # Try multiple login button patterns
+        try:
+            await page.get_by_text("登入", exact=False).first.click(timeout=5000)
+        except:
+            try:
+                await page.get_by_role("button", name="登入").first.click(timeout=5000)
+            except:
+                # Fallback to any button with "登入" text
+                all_buttons = await page.query_selector_all('button')
+                for btn in all_buttons:
+                    text = await btn.inner_text()
+                    if "登入" in text:
+                        await btn.click()
+                        break
         await page.wait_for_timeout(2000)
 
     async def _execute_action(self, page: Page, action: str):
