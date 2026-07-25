@@ -99,10 +99,18 @@ def create_app(config: dict = None) -> Flask:
     @app.route("/api/ai/run", methods=["POST"])
     def ai_run():
         data = request.json
+        print(f"\n=== TEST RUN DEBUG ===")
+        print(f"Spec: {data.get('spec', {}).get('name', 'unknown')}")
+        print(f"Actions: {data.get('spec', {}).get('actions', [])}")
+        print(f"Target URL: {data.get('spec', {}).get('target', {}).get('url', '')}")
         try:
             spec = TestSpec.from_dict(data["spec"])
+            print(f"→ Creating runner (headless={not data.get('headed', False)})...")
             runner = Runner(spec, headless=not data.get("headed", False))
+            print(f"→ Running tests...")
             summary = asyncio.run(runner.run())
+            print(f"✓ Test run complete: passed={summary.get('passed', 0)}, failed={summary.get('failed', 0)}")
+            print(f"=== END DEBUG ===\n")
             return jsonify({
                 "summary": summary,
                 "results": [
@@ -111,6 +119,10 @@ def create_app(config: dict = None) -> Flask:
                 ],
             })
         except Exception as e:
+            print(f"✗ ERROR: {e}")
+            print(f"=== END DEBUG (FAILED) ===\n")
+            import traceback
+            traceback.print_exc()
             return jsonify({"error": str(e)}), 500
 
     return app
