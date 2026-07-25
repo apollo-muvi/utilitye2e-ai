@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>utilitye2e-ai</title>
     <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/app.css">
 </head>
 <body>
 <div id="app">
@@ -22,7 +23,7 @@
                 <div class="parallel-or">OR</div>
                 <div class="parallel-node">
                     <label>URL Path</label>
-                    <input id="txt-url" class="flow-input" placeholder="/t/ctb-premium-demo/ctb/parents">
+                    <input id="txt-url" class="flow-input" placeholder="/page/settings 或 http://localhost:3002/page/settings">
                 </div>
             </div>
 
@@ -67,12 +68,20 @@
 
         <!-- Step 3: Results -->
         <section id="step-results" class="card hidden">
-            <h2>Step 3 — 測試結果</h2>
+            <div class="section-header">
+                <h2>Step 3 — 測試結果</h2>
+                <div class="btn-group">
+                    <button id="btn-clear-results" class="btn btn-secondary">清除</button>
+                    <button id="btn-save-results" class="btn btn-primary">存檔</button>
+                </div>
+            </div>
             <div id="result-summary" class="summary-grid"></div>
-            <table id="result-table">
-                <thead><tr><th></th><th>Test</th><th>Detail</th></tr></thead>
-                <tbody></tbody>
-            </table>
+            <div class="table-scroll">
+                <table id="result-table">
+                    <thead><tr><th></th><th>Test</th><th>Detail</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+            </div>
         </section>
     </main>
 </div>

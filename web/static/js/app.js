@@ -14,6 +14,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("btn-analyze").addEventListener("click", analyze);
     document.getElementById("btn-run").addEventListener("click", runTest);
     document.getElementById("btn-save").addEventListener("click", saveSpec);
+    document.getElementById("btn-clear-results").addEventListener("click", clearResults);
+    document.getElementById("btn-save-results").addEventListener("click", saveResults);
 });
 
 // ─── Load tables ───
@@ -37,7 +39,12 @@ async function analyze() {
     const btn = document.getElementById("btn-analyze");
 
     errEl.classList.add("hidden");
-    if (!table) { errEl.textContent = "請選擇 table"; errEl.classList.remove("hidden"); return; }
+    // Allow either table OR url_path, not both required
+    if (!table && !urlPath) { 
+        errEl.textContent = "請選擇 table 或輸入 URL 路徑"; 
+        errEl.classList.remove("hidden"); 
+        return; 
+    }
     if (!desc) { errEl.textContent = "請輸入描述"; errEl.classList.remove("hidden"); return; }
 
     btn.disabled = true; btn.textContent = "AI 分析中...";
@@ -167,3 +174,35 @@ function saveSpec() {
     a.download = `spec_${spec.table || "test"}.json`;
     a.click();
 }
+
+// ─── Clear results ───
+function clearResults() {
+    document.getElementById("result-summary").innerHTML = "";
+    document.querySelector("#result-table tbody").innerHTML = "";
+}
+
+// ─── Save results ───
+function saveResults() {
+    const summary = document.getElementById("result-summary").innerHTML;
+    const rows = [...document.querySelectorAll("#result-table tbody tr")];
+    if (rows.length === 0) {
+        alert("沒有測試結果可以存檔");
+        return;
+    }
+
+    const results = rows.map(row => {
+        const cells = row.querySelectorAll("td");
+        return {
+            status: row.querySelector(`[class*="status-"]`)?.className.replace("status-", "") || "unknown",
+            name: cells[1]?.textContent || "",
+            detail: cells[2]?.textContent || ""
+        };
+    });
+
+    const blob = new Blob([JSON.stringify({ summary, results }, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `results_${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+}
+
