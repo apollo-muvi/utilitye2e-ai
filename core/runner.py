@@ -25,6 +25,7 @@ class Runner:
 
     async def run(self) -> dict:
         """Execute the test spec, return results summary."""
+        print(f"  → Starting Playwright browser...")
         async with async_playwright() as p:
             browser = await p.chromium.launch(
                 headless=self.headless,
@@ -44,18 +45,29 @@ class Runner:
 
             try:
                 # Login if needed
+                print(f"  → Checking login requirements...")
                 await self._do_login(page)
                 # Navigate to target
+                print(f"  → Navigating to {self.spec.target.url}...")
                 await page.goto(self.spec.target.url, wait_until="networkidle")
+                print(f"  → Page loaded, waiting 2s...")
                 await page.wait_for_timeout(2000)
 
                 # Execute actions
-                for action in self.spec.actions:
+                print(f"  → Executing {len(self.spec.actions)} actions: {self.spec.actions}")
+                for i, action in enumerate(self.spec.actions):
+                    print(f"  → [{i+1}/{len(self.spec.actions)}] Running action: {action}")
                     await self._execute_action(page, action)
 
+                print(f"  → All actions completed")
+
             except Exception as exc:
+                print(f"  ✗ Exception during test execution: {exc}")
+                import traceback
+                traceback.print_exc()
                 self.recorder.fail("setup", f"Setup failed: {exc}")
             finally:
+                print(f"  → Closing browser...")
                 await browser.close()
 
         return self.recorder.summary()
