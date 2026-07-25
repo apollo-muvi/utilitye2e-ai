@@ -114,22 +114,55 @@ class Runner:
                 pass  # field may not exist in this context
 
     async def _get_button(self, page: Page, name: str):
-        """Find button with fallback: exact match → partial text match → any button."""
-        # Try exact match first
-        btn = page.get_by_role("button", name=name, exact=True)
-        if await btn.count() > 0:
-            return btn.first
+        """Find button with intelligent fallback strategies."""
+        if not name:
+            # Fallback: find any button with common add/save/cancel text
+            all_buttons = await page.query_selector_all('button')
+            for btn in all_buttons:
+                text = await btn.inner_text().strip()
+                if text in ["新增", "新增", "Add", "Save", "儲存", "取消", "Cancel"]:
+                    return btn
+            return all_buttons[0] if all_buttons else None
 
-        # Fallback: partial text match
+        # Strategy 1: Extract core keyword from button name (remove symbols)
+        # "+新增選手" → "新增", "Save Changes" → "Save"
+        keywords = [name]
+        if "+" in name:
+            keywords.append(name.replace("+", "").strip())
+        # Extract Chinese characters (each as potential keyword)
+        import re
+        cn_chars = re.findall(r'[\u4e00-\u9fff]', name)
+        if cn_chars:
+            # Try both single char and combinations
+            for i in range(len(cn_chars)):
+                keywords.append(cn_chars[i])
+                if i < len(cn_chars) - 1:
+                    keywords.append(cn_chars[i] + cn_chars[i+1])
+        # Extract English words
+        en_words = re.findall(r'[A-Za-z]+', name)
+        for word in en_words:
+            keywords.append(word)
+
+        # Strategy 2: Try exact match for each keyword
+        for kw in keywords:
+            btn = page.get_by_role("button", name=kw, exact=True)
+            if await btn.count() > 0:
+                return btn.first
+
+        # Strategy 3: Partial text match for each keyword
         all_buttons = await page.query_selector_all('button')
+        for kw in keywords:
+            for btn in all_buttons:
+                text = await btn.inner_text()
+                if kw and kw in text:
+                    return btn
+
+        # Strategy 4: Match by common patterns (icon + text)
         for btn in all_buttons:
             text = await btn.inner_text()
-            if name and name in text:
+            # Check if button contains any of our keywords
+            if any(kw in text for kw in keywords if kw):
                 return btn
-
-        # Last resort: any button (if name is empty or special)
-        if not name or name in ["儲存", "取消", "新增", "編輯", "刪除"]:
-            return all_buttons[0] if all_buttons else None
 
         return None
 
