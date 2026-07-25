@@ -50,8 +50,8 @@ class Runner:
                 # Navigate to target
                 print(f"  → Navigating to {self.spec.target.url}...")
                 await page.goto(self.spec.target.url, wait_until="networkidle")
-                print(f"  → Page loaded, waiting 2s...")
-                await page.wait_for_timeout(2000)
+                print(f"  → Page loaded, waiting for JS rendering (5s)...")
+                await page.wait_for_timeout(5000)  # Increased from 2s to 5s
 
                 # Execute actions
                 print(f"  → Executing {len(self.spec.actions)} actions: {self.spec.actions}")
@@ -96,7 +96,8 @@ class Runner:
                     if "登入" in text:
                         await btn.click()
                         break
-        await page.wait_for_timeout(2000)
+        print(f"  → Login completed, waiting 3s for session...")
+        await page.wait_for_timeout(3000)  # Wait for login session to establish
 
     async def _execute_action(self, page: Page, action: str):
         ui = self.spec.ui
