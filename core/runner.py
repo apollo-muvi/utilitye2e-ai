@@ -79,10 +79,29 @@ class Runner:
             return
         # Convert relative login_url to absolute
         login_url = t.login_url if t.login_url.startswith('http') else f"{t.url.rstrip('/')}/{t.login_url.lstrip('/')}"
+        
+        print(f"  → Going to login page: {login_url}")
         await page.goto(login_url, wait_until="networkidle")
-        await page.fill('input[name="username"], input[type="text"]', t.username)
-        await page.fill('input[name="password"], input[type="password"]', t.password)
+        print(f"  → Login page loaded, waiting for inputs to appear...")
+        await page.wait_for_timeout(2000)  # Wait for inputs to render
+        
+        # Wait for inputs to be visible
+        try:
+            print(f"  → Waiting for username input...")
+            await page.wait_for_selector('input[name="username"], input[type="text"]', timeout=10000)
+            print(f"  → Filling username...")
+            await page.fill('input[name="username"], input[type="text"]', t.username)
+            
+            print(f"  → Waiting for password input...")
+            await page.wait_for_selector('input[name="password"], input[type="password"]', timeout=10000)
+            print(f"  → Filling password...")
+            await page.fill('input[name="password"], input[type="password"]', t.password)
+        except Exception as e:
+            print(f"  ✗ Input field error: {e}")
+            raise
+        
         # Try multiple login button patterns
+        print(f"  → Looking for login button...")
         try:
             await page.get_by_text("登入", exact=False).first.click(timeout=5000)
         except:
@@ -94,6 +113,7 @@ class Runner:
                 for btn in all_buttons:
                     text = await btn.inner_text()
                     if "登入" in text:
+                        print(f"  → Clicking login button with text: '{text}'")
                         await btn.click()
                         break
         print(f"  → Login completed, waiting 3s for session...")
