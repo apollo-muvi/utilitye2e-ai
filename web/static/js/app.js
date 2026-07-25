@@ -48,17 +48,22 @@ async function analyze() {
     if (!desc) { errEl.textContent = "請輸入描述"; errEl.classList.remove("hidden"); return; }
 
     btn.disabled = true; btn.textContent = "AI 分析中...";
+    console.log("[DEBUG] Starting AI analyze:", { table, urlPath, desc: desc.substring(0, 50) + "..." });
     try {
         const r = await fetch("/api/ai/analyze", {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ description: desc, table, url_path: urlPath })
         });
+        console.log("[DEBUG] Response status:", r.status);
         const d = await r.json();
+        console.log("[DEBUG] Response data:", d);
         if (d.error) { errEl.textContent = d.error; errEl.classList.remove("hidden"); return; }
         currentSpec = d.spec;
+        console.log("[DEBUG] Spec loaded:", currentSpec?.name, `${currentSpec?.fields?.length || 0} fields`);
         renderSpec(currentSpec);
         document.getElementById("step-spec").classList.remove("hidden");
     } catch (e) {
+        console.error("[DEBUG] Analyze failed:", e);
         errEl.textContent = e.message; errEl.classList.remove("hidden");
     } finally {
         btn.disabled = false; btn.textContent = "AI 分析";

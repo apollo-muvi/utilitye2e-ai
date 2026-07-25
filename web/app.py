@@ -67,21 +67,33 @@ def create_app(config: dict = None) -> Flask:
     @app.route("/api/ai/analyze", methods=["POST"])
     def ai_analyze():
         data = request.json
+        print(f"\n=== AI ANALYZE DEBUG ===")
+        print(f"Input: description='{data.get('description', '')[:100]}...', table='{data.get('table', '')}', url_path='{data.get('url_path', '')}'")
         try:
+            print(f"→ Creating schema adapter...")
             schema = create_schema_adapter(config["schema"])
+            print(f"→ Creating LLM adapter...")
             llm = create_llm_adapter(config["llm"])
+            print(f"→ Creating analyzer...")
             analyzer = Analyzer(llm, schema)
+            print(f"→ Calling analyzer.generate()...")
             spec = analyzer.generate(
                 description=data["description"],
-                table=data["table"],
+                table=data.get("table", ""),
                 base_url=config["target"]["base_url"],
                 login_url=config["target"].get("login_url", ""),
                 username=config["target"].get("username", ""),
                 password=config["target"].get("password", ""),
                 url_path=data.get("url_path", ""),
             )
+            print(f"✓ Analysis complete: {spec.name} with {len(spec.fields)} fields")
+            print(f"=== END DEBUG ===\n")
             return jsonify({"spec": spec.to_dict(), "spec_json": spec.to_json()})
         except Exception as e:
+            print(f"✗ ERROR: {e}")
+            print(f"=== END DEBUG (FAILED) ===\n")
+            import traceback
+            traceback.print_exc()
             return jsonify({"error": str(e)}), 500
 
     @app.route("/api/ai/run", methods=["POST"])
