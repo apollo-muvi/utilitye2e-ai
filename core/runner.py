@@ -201,19 +201,26 @@ class Runner:
 
     async def _test_add_save(self, page: Page, name: str):
         try:
+            print(f"    → Clicking add button: {self.spec.ui.add_button}")
             btn = await self._get_button(page, self.spec.ui.add_button)
             if not btn:
                 raise Exception(f"找不到按鈕: {self.spec.ui.add_button}")
             await btn.click()
+            print(f"    → Add button clicked, waiting 1s...")
             await page.wait_for_timeout(1000)
+            print(f"    → Filling fields...")
             await self._fill_fields(page)
+            print(f"    → Looking for save button: {self.spec.ui.save_button}")
             save_btn = await self._get_button(page, self.spec.ui.save_button)
             if not save_btn:
                 raise Exception(f"找不到按鈕: {self.spec.ui.save_button}")
+            print(f"    → Clicking save button...")
             await save_btn.click()
+            print(f"    → Waiting 2s for save to complete...")
             await page.wait_for_timeout(2000)
             self.recorder.pass_(name, "新增儲存完成")
         except Exception as exc:
+            print(f"    ✗ add_save failed: {exc}")
             self.recorder.fail(name, str(exc))
 
     async def _test_edit_cancel(self, page: Page, name: str):
