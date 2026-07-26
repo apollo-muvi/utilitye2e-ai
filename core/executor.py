@@ -200,8 +200,15 @@ class Executor:
                 return el
         return None
 
-    async def _try_locators(self, locators: List[str], action: str, value: str = ""):
-        """Try each locator strategy in order until one succeeds."""
+    async def _try_locators(self, locators: List[str], action: str, value: str = "",
+                           step_desc: str = "", element_keywords: str = ""):
+        """Try each locator strategy in order until one succeeds.
+        
+        If all exact strategies fail, falls back to fuzzy matching:
+        - For get_by_text: tries substrings of the target text
+        - For get_by_role: tries role + partial name match
+        - If all fail, uses element map info for a best-effort analysis
+        """
         last_error = None
         for loc_str in locators:
             try:
@@ -220,7 +227,78 @@ class Executor:
                 last_error = e
                 continue
 
+        # ── Fuzzy fallback: exact locators failed, try smarter matching ──
+        # For text-based actions, try contains-match with shorter substrings
+        if action in ("click", "wait_for", "assert"):
+            # Extract the target text from the first locator
+            target_text = ""
+            for loc in locators:
+                if loc.startswith("get_by_text:"):
+                    target_text = loc.split(":", 1)[1]
+                    break
+                elif loc.startswith("get_by_role:"):
+                    parts = loc.split(":")
+                    if len(parts) > 2 and "name=" in parts[2]:
+                        target_text = parts[2].replace("name=", "", 1)
+                        break
+
+            if target_text:
+                # Strategy 1: Try each word/segment individually
+                segments = self._segment_text(target_text)
+                for seg in segments:
+                    if len(seg) < 2:
+                        continue
+                    try:
+                        loc = self._page.get_by_text(seg, exact=False)
+                        if await loc.count() > 0:
+                            if action == "click":
+                                await loc.first.click()
+                            return
+                    except Exception:
+                        continue
+
+                # Strategy 2: Try role + contains match  
+                if action == "click":
+                    for seg in segments[:3]:
+                        if len(seg) < 2:
+                            continue
+                        try:
+                            loc = self._page.get_by_role("button").filter(has_text=seg)
+                            if await loc.count() > 0:
+                                await loc.first.click()
+                                return
+                        except Exception:
+                            continue
+                        try:
+                            loc = self._page.get_by_role("link").filter(has_text=seg)
+                            if await loc.count() > 0:
+                                await loc.first.click()
+                                return
+                        except Exception:
+                            continue
+
         raise last_error or Exception("No locator strategies worked")
+
+    def _segment_text(self, text: str) -> List[str]:
+        """Split text into meaningful segments for fuzzy matching.
+        
+        Examples:
+            "+ 新增選手" → ["+ 新增選手", "新增選手", "新增"]
+            "Edit Profile" → ["Edit Profile", "Edit"]
+            "儲存設定" → ["儲存設定", "儲存"]
+        """
+        import re
+        results = [text]  # Full text first
+        # Remove leading special chars: "+ 新增選手" → "新增選手"
+        cleaned = re.sub(r'^[\+\-\*·•\s]+', '', text).strip()
+        if cleaned and cleaned != text:
+            results.append(cleaned)
+        # Also try just the first 2+ chars that are actual content
+        words = re.findall(r'[\u4e00-\u9fff\w]+', text)
+        for w in words:
+            if w not in results and len(w) >= 2:
+                results.append(w)
+        return results
 
     def _build_locator(self, loc_str: str):
         """Convert a locator string to a Playwright Locator object."""

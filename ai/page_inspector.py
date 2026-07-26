@@ -179,13 +179,18 @@ async def inspect_page(
                 }
 
                 // 7) Visible text content (for buttons/links)
-                const text = (el.textContent || '').trim();
-                if (text && text.length < 60 && !el.name && !el.placeholder) {
-                    if (el.role === 'button' || el.tagName === 'BUTTON' || el.tagName === 'A') {
-                        locs.push(`get_by_role:button:name=${text}`);
-                        locs.push(`get_by_text:${text}`);
-                    }
-                }
+                                                const text = (el.textContent || '').trim();
+                                                if (text && text.length < 60 && !el.name && !el.placeholder) {
+                                                    if (el.role === 'button' || el.tagName === 'BUTTON' || el.tagName === 'A') {
+                                                        locs.push(`get_by_role:button:name=${text}`);
+                                                        locs.push(`get_by_text:${text}`);
+                                                        // Also add a clean-text variant: strip leading symbols like "+ " or "- "
+                                                        const cleanText = text.replace(/^[+\-*·•\s]+/, '').trim();
+                                                        if (cleanText && cleanText !== text && cleanText.length >= 2) {
+                                                            locs.push(`get_by_text:${cleanText}`);
+                                                        }
+                                                    }
+                                                }
 
                 return locs;
             }
