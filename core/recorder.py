@@ -52,4 +52,5 @@ class Recorder:
             "failed": self.failed,
             "skipped": self.skipped,
             "mutations": len(self.mutations),
+            "results": [{"label": r.name, "status": r.status, "detail": r.detail} for r in self.results],
         }

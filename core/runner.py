@@ -45,7 +45,7 @@ class Runner:
 
                 for i, step in enumerate(self.spec.steps):
                     label = f"{self.spec.name} #{i+1} {step.desc or step.button}"
-                    await self._run_step(page, step, label)
+                    await self._run_step(page, step, label, i)
 
                 print("  → Done")
             except Exception as exc:
@@ -89,19 +89,22 @@ class Runner:
         """)
 
     # ─── Run one step ───
-    async def _run_step(self, page: Page, step: TestStep, label: str):
+    async def _run_step(self, page: Page, step: TestStep, label: str, step_idx: int):
         try:
+            # 0. Auto-fill visible empty inputs BEFORE clicking (skip first step)
+            if step_idx > 0:
+                await self._auto_fill_empty_inputs(page)
+
             # 1. Snapshot before
             before = await self._snapshot(page)
             url_before = page.url
 
-            # 2. Find button
+            # 2. Find + click button
             btn = await self._find_button(page, step.button)
             if not btn:
                 self.recorder.fail(label, f"找不到按鈕: {step.button}")
                 return
 
-            # 3. Click
             try:
                 await btn.click(timeout=5000)
             except Exception:
@@ -109,46 +112,151 @@ class Runner:
             print(f"    → Clicked: {step.button}")
             await page.wait_for_timeout(2000)
 
-            # 4. Fill fields if any
+            # 3. Fill explicit fields if any
             if step.fill_fields:
                 await self._fill_fields(page, step.fill_fields)
                 await page.wait_for_timeout(500)
 
-            # 5. Snapshot after
+            # 4. Snapshot after
             after = await self._snapshot(page)
             url_after = page.url
 
-            # 6. Diff
-            if before != after:
-                # Describe what changed
+            # 5. Diff
+            changed = before != after
+            if not changed:
+                # 5a. Wait longer for async operations (delete via confirm dialog)
+                await page.wait_for_timeout(3000)
+                after = await self._snapshot(page)
+                changed = before != after
+            if not changed:
+                # 5b. Reload page to check if server-side change happened
+                #     (e.g. delete succeeded but React didn't re-render)
+                try:
+                    await page.reload(wait_until="networkidle")
+                    await page.wait_for_timeout(2000)
+                    after = await self._snapshot(page)
+                    changed = before != after
+                except:
+                    pass
+
+            after_final = await self._snapshot(page) if not changed else after
+
+            # 6. Report
+            if changed or (before != after_final):
                 import json
-                b, a = json.loads(before), json.loads(after)
+                snap = after_final if changed else after
+                b, a = json.loads(before), json.loads(snap)
                 d_el = a["count"] - b["count"]
                 d_in = a["inputs"] - b["inputs"]
                 parts = []
                 if d_el: parts.append(f"DOM {b['count']}→{a['count']} ({'+' if d_el>0 else ''}{d_el})")
                 if d_in: parts.append(f"inputs {b['inputs']}→{a['inputs']}")
-                if url_before != url_after: parts.append(f"URL→{url_after}")
+                if url_before != page.url: parts.append(f"URL→{page.url}")
                 if not parts: parts.append("按鈕文字變化")
                 self.recorder.pass_(label, f"✓ {', '.join(parts)}")
             else:
                 self.recorder.fail(label, "DOM 無變化，按鈕可能無效")
 
-            # 7. Reload to reset state for next step
+            # 7. Dismiss overlay only if step changed DOM and a backdrop exists
             try:
-                await page.reload(wait_until="networkidle")
-                await page.wait_for_timeout(2000)
+                has_overlay = await page.evaluate("""
+                    () => {
+                        const els = [...document.querySelectorAll('*')];
+                        return els.some(el => {
+                            const s = getComputedStyle(el);
+                            return (s.position === 'fixed' || s.position === 'absolute')
+                                && parseFloat(s.zIndex) > 100
+                                && el.getBoundingClientRect().width > window.innerWidth * 0.5;
+                        });
+                    }
+                """)
+                if has_overlay:
+                    await page.keyboard.press("Escape")
+                    await page.wait_for_timeout(500)
             except:
                 pass
+
+            # 8. Only reload if nothing changed (reset dead state)
+            final_changed = before != await self._snapshot(page)
+            if not final_changed:
+                try:
+                    await page.reload(wait_until="networkidle")
+                    await page.wait_for_timeout(2000)
+                except:
+                    pass
 
         except Exception as exc:
             print(f"    ✗ {exc}")
             self.recorder.fail(label, str(exc))
-            try:
-                await page.reload(wait_until="networkidle")
-                await page.wait_for_timeout(2000)
-            except:
-                pass
+
+    # ─── Auto-fill visible empty inputs with test data ───
+    async def _auto_fill_empty_inputs(self, page: Page):
+        """Fill any visible empty input/textarea/select with generic test data."""
+        try:
+            # 1. Fill selects first (often required)
+            selects = await page.query_selector_all("select")
+            for sel in selects:
+                try:
+                    if await sel.is_visible():
+                        opts = await sel.query_selector_all("option")
+                        for opt in opts[1:]:  # skip placeholder
+                            ov = await opt.get_attribute("value")
+                            if ov:
+                                await sel.select_option(value=ov)
+                                print(f"    → Auto-filled select: {ov}")
+                                break
+                except:
+                    pass
+            # 2. Fill text inputs (input without type, or type=text/email/tel)
+            els = await page.query_selector_all('input:not([type]), input[type="text"], input[type="email"], input[type="tel"], textarea')
+            for el in els:
+                try:
+                    if not await el.is_visible():
+                        continue
+                    val = await el.input_value()
+                    if val.strip():
+                        continue
+                    ph = await el.get_attribute("placeholder") or ""
+                    el_id = await el.get_attribute("id") or ""
+                    if "phone" in ph.lower() or "phone" in el_id.lower() or "電" in ph:
+                        await el.fill("0900000000")
+                    elif "email" in ph.lower():
+                        await el.fill("test@test.com")
+                    elif "name" in ph.lower() or "name" in el_id.lower() or "名" in ph:
+                        await el.fill("E2E測試")
+                    else:
+                        await el.fill("test_data")
+                    print(f"    → Auto-filled: {ph or el_id or 'input'}")
+                except:
+                    pass
+        except:
+            pass
+
+    # ─── Confirm retry: click newly visible button if DOM unchanged ───
+    async def _try_confirm_retry(self, page: Page, before_snap: str, step: TestStep) -> bool:
+        """If click didn't change DOM, maybe a confirm dialog appeared.
+        Try clicking any newly visible button that looks like confirm/delete."""
+        import json
+        try:
+            b = json.loads(before_snap)
+            b_texts = set(b.get("btns", "").split("|"))
+            # Look for confirm-like buttons
+            for btn in await page.query_selector_all("button"):
+                try:
+                    if not await btn.is_visible():
+                        continue
+                    bt = (await btn.inner_text()).strip()
+                    if bt and bt not in b_texts:
+                        # Click it (it's newly visible)
+                        await btn.click(timeout=3000)
+                        await page.wait_for_timeout(2000)
+                        print(f"    → Confirm retry clicked: {bt}")
+                        return True
+                except:
+                    continue
+        except:
+            pass
+        return False
 
     # ─── Find button ───
     async def _find_button(self, page: Page, text: str):

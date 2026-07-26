@@ -1,2 +1,3 @@
 __pycache__/\n*.pyc\n.env\nconfig.yaml\noutput/\n/tmp/\n
 .env
+__pycache__/
