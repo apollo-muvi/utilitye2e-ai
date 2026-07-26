@@ -121,3 +121,31 @@ All target connection info (URL, login, credentials) is entered in the Web UI at
 ## License
 
 MIT
+
+## Roadmap & Limitations
+
+### What works now (Phase 1 — ready to use)
+
+- **Target users**: PMs doing quick validation, QA doing smoke tests, demo showcases
+- **Value**: within 30 seconds, know which buttons on a page are clickable and whether clicking them causes a DOM change
+- **Zero-code**: fill URL → select elements → AI generates → one-click run
+- **Framework-agnostic**: DOM diff works on React, Vue, Angular, vanilla JS — no framework-specific logic
+
+### Known limitations
+
+| Issue | Impact |
+|-------|--------|
+| Test data not controllable | Deep scan fills "test_" fake data; production tests need controlled fixtures |
+| No persistence verification | DOM diff only checks UI changes, but "is data still there after reload?" needs a second pass |
+| Step ordering has state dependencies | Must create before delete; no automatic prerequisite ordering yet |
+| Complex interactions unsupported | Drag-and-drop, file upload, multi-tab, iframes |
+| Simple reports | Only DOM +/- counts; no screenshot, trace, or shareable format |
+| No flakiness handling | Fixed timeouts, no retry or smart wait |
+
+### Phase 2 — planned improvements
+
+- Reload verification (save → reload → confirm data persisted)
+- AI auto-orders steps (create → edit → delete sequence)
+- Per-step screenshot + HTML snapshot evidence
+- Export Playwright script (for engineers to take over and fine-tune)
+- Smart wait with retry to reduce flakiness
