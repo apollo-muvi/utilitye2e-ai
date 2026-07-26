@@ -1,0 +1,104 @@
+:root {
+    --bg: #f8fafc; --surface: #ffffff; --border: #e2e8f0;
+    --text: #1e293b; --muted: #64748b; --primary: #3b82f6;
+    --green: #22c55e; --red: #ef4444; --yellow: #eab308;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); }
+header { padding: 20px 30px; background: #ffffff; border-bottom: 1px solid var(--border); }
+header h1 { font-size: 1.4rem; }
+main { max-width: 1100px; margin: 20px auto; padding: 0 20px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.card h2 { font-size: 1.1rem; margin-bottom: 16px; }
+.card h3 { font-size: .9rem; margin: 16px 0 8px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+.row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+.col { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.col label { font-size: .8rem; color: var(--muted); }
+input, select, textarea {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    color: var(--text); padding: 8px 10px; font-size: .9rem; width: 100%;
+}
+input:focus, select:focus, textarea:focus { outline: none; border-color: var(--primary); }
+.btn-primary {
+    background: var(--primary); color: #fff; border: none; border-radius: 6px;
+    padding: 10px 24px; font-size: .9rem; cursor: pointer; white-space: nowrap;
+}
+.btn-primary:hover { filter: brightness(1.1); }
+.btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+.btn-secondary {
+    background: var(--border); color: var(--text); border: none; border-radius: 6px;
+    padding: 10px 24px; font-size: .9rem; cursor: pointer;
+}
+table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); font-size: .85rem; }
+th { color: var(--muted); font-weight: 600; font-size: .75rem; text-transform: uppercase; }
+td input, td select { padding: 4px 6px; }
+.ui-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.ui-grid .field { display: flex; flex-direction: column; gap: 2px; }
+.ui-grid label { font-size: .75rem; color: var(--muted); }
+.action-grid { display: flex; gap: 8px; flex-wrap: wrap; }
+.action-tag {
+    padding: 6px 14px; border-radius: 20px; font-size: .8rem; cursor: pointer;
+    background: var(--bg); border: 1px solid var(--border); color: var(--muted);
+}
+.action-tag.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+.summary-grid { display: flex; gap: 16px; margin-bottom: 20px; }
+.summary-box { flex: 1; background: var(--bg); border-radius: 8px; padding: 16px; text-align: center; }
+.summary-box .num { font-size: 2rem; font-weight: bold; }
+.summary-box .lbl { font-size: .8rem; color: var(--muted); }
+.summary-box.pass .num { color: var(--green); }
+.summary-box.fail .num { color: var(--red); }
+.summary-box.skip .num { color: var(--yellow); }
+.hidden { display: none !important; }
+
+/* ─── Decision Flow ─── */
+.flow-container { display: flex; align-items: stretch; gap: 0; margin-top: 8px; }
+.flow-node { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
+.flow-node.flow-grow { flex: 2.5; }
+.flow-node.flow-action { justify-content: flex-end; padding-bottom: 2px; }
+.flow-num {
+    width: 28px; height: 28px; border-radius: 50%;
+    background: var(--primary); color: #fff;
+    display: flex; align-items: center; justify-content: center;
+    font-size: .8rem; font-weight: bold; flex-shrink: 0;
+}
+.flow-body { display: flex; flex-direction: column; gap: 4px; }
+.flow-body label { font-size: .75rem; color: var(--muted); }
+.flow-input { font-size: 1rem !important; padding: 14px 16px !important; height: auto; }
+.flow-arrow {
+    display: flex; align-items: center; font-size: 1.6rem; color: var(--muted);
+    padding: 0 12px; align-self: center; flex-shrink: 0;
+}
+.btn-large { padding: 16px 28px !important; font-size: 1rem !important; white-space: nowrap; }
+.error-msg { color: var(--red); margin-top: 12px; font-size: .85rem; }
+
+/* ─── Parallel Flow ─── */
+.parallel-row {
+    display: flex; gap: 16px; align-items: flex-start; margin-bottom: 0;
+}
+.parallel-node {
+    flex: 1; display: flex; flex-direction: column; gap: 4px;
+}
+.parallel-node label { font-size: .8rem; color: var(--muted); }
+.parallel-or {
+    display: flex; align-items: center; align-self: stretch;
+    color: var(--muted); font-size: .85rem; font-weight: 600;
+    padding-top: 28px;
+}
+.flow-merge {
+    text-align: center; font-size: 1.6rem; color: var(--muted);
+    padding: 6px 0; line-height: 1;
+}
+.flow-question { margin-bottom: 0; }
+.flow-question label { display: block; font-size: .8rem; color: var(--muted); margin-bottom: 4px; }
+.flow-question textarea {
+    font-size: 1.1rem; padding: 16px; width: 100%;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text); resize: vertical;
+}
+.flow-question textarea:focus { outline: none; border-color: var(--primary); }
+.flow-action-row { text-align: center; }
+.status-pass { color: var(--green); font-weight: bold; }
+.status-fail { color: var(--red); font-weight: bold; }
+.status-skip { color: var(--yellow); }
+#txt-description { resize: vertical; }

@@ -1,0 +1,40 @@
+# utilitye2e-ai Configuration
+# Copy to config.yaml and edit
+
+# ─── Schema Adapter (where to read DB table/column info) ───
+schema:
+  adapter: postgres       # postgres | sqlite | manual
+  # For postgres / mysql:
+  connection: "postgresql://user:password@localhost:5432/dbname"
+  # For sqlite:
+  # path: "/path/to/database.db"
+  # For manual:
+  # path: "./schema.json"
+
+# ─── LLM Adapter (how AI analyzes your description) ───
+llm:
+  adapter: glm            # glm | openai | ollama
+  model: glm-4-flash
+  api_key: ${GLM_API_KEY} # from env var, or put literal key
+  # For OpenAI:
+  # adapter: openai
+  # model: gpt-4o-mini
+  # api_key: ${OPENAI_API_KEY}
+  # For Ollama (local, no key):
+  # adapter: ollama
+  # model: qwen2.5:14b
+  # base_url: http://localhost:11434
+
+# ─── Target Web App (what to test) ───
+target:
+  base_url: "http://localhost:3001"
+  login_url: "http://localhost:3001/login"
+  auth:
+    username: admin
+    password: admin
+
+# ─── Web UI ───
+web:
+  host: 0.0.0.0
+  port: 5000
+  debug: true

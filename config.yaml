@@ -1,0 +1,16 @@
+# utilitye2e-ai Configuration — ClassTutorBot
+# Copy to config.yaml and edit
+
+# ─── LLM Adapter ───
+llm:
+  adapter: hermes
+  model: hermes-agent
+  api_key: hermes-api-key-local
+  base_url: http://localhost:8642/v1
+
+# ─── Target Web App ───
+target:
+  base_url: ""
+  login_url: ""
+  username: ""
+  password: ""

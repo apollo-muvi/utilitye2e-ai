@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>utilitye2e-ai</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+<div id="app">
+    <header><h1>🤖 utilitye2e-ai</h1></header>
+
+    <main>
+        <!-- Step 1: Describe -->
+        <section id="step-describe" class="card">
+            <!-- Parallel options -->
+            <div class="parallel-row">
+                <div class="parallel-node">
+                    <label>DB Table</label>
+                    <select id="sel-table" class="flow-input"><option value="">載入中...</option></select>
+                </div>
+                <div class="parallel-or">OR</div>
+                <div class="parallel-node">
+                    <label>URL Path</label>
+                    <input id="txt-url" class="flow-input" placeholder="/t/ctb-premium-demo/ctb/parents">
+                </div>
+            </div>
+
+            <div class="flow-merge">↓</div>
+
+            <!-- Question box -->
+            <div class="flow-question">
+                <label>描述你想測試什麼</label>
+                <textarea id="txt-description" rows="3" placeholder="例: 測試家長管理的新增、編輯、刪除功能"></textarea>
+            </div>
+
+            <div class="flow-merge">↓</div>
+
+            <div class="flow-action-row">
+                <button id="btn-analyze" class="btn-primary btn-large">🤖 AI 分析</button>
+            </div>
+            <div id="analyze-error" class="error-msg hidden"></div>
+        </section>
+
+        <!-- Step 2: Review/Edit Spec -->
+        <section id="step-spec" class="card hidden">
+            <h2>Step 2 — 檢視/微調 Test Spec</h2>
+            <div class="row">
+                <div class="col"><label>Test Name</label><input id="sp-name"></div>
+                <div class="col" style="flex:2"><label>Target URL</label><input id="sp-url"></div>
+                <div class="col"><label>Table</label><input id="sp-table"></div>
+            </div>
+            <h3>Fields</h3>
+            <table id="spec-fields">
+                <thead><tr><th>欄位</th><th>Label</th><th>Selector</th><th>測試值</th><th>Type</th><th>Required</th></tr></thead>
+                <tbody></tbody>
+            </table>
+            <h3>UI Elements</h3>
+            <div id="spec-ui" class="ui-grid"></div>
+            <h3>Actions</h3>
+            <div id="spec-actions" class="action-grid"></div>
+            <div class="row" style="margin-top:12px">
+                <button id="btn-run" class="btn-primary">▶ 執行測試</button>
+                <button id="btn-save" class="btn-secondary">💾 存檔</button>
+            </div>
+        </section>
+
+        <!-- Step 3: Results -->
+        <section id="step-results" class="card hidden">
+            <h2>Step 3 — 測試結果</h2>
+            <div id="result-summary" class="summary-grid"></div>
+            <table id="result-table">
+                <thead><tr><th></th><th>Test</th><th>Detail</th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </section>
+    </main>
+</div>
+<script src="/static/js/app.js"></script>
+</body>
+</html>

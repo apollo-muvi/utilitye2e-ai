@@ -1,0 +1,29 @@
+{
+  "tables": {
+    "plugin_ctb_parents": [
+      {"name": "id", "data_type": "uuid", "nullable": false, "is_pk": true},
+      {"name": "tenant_id", "data_type": "varchar", "nullable": false},
+      {"name": "name", "data_type": "varchar", "nullable": false, "comment": "家長姓名"},
+      {"name": "phone", "data_type": "varchar", "comment": "聯絡電話"},
+      {"name": "email", "data_type": "varchar", "comment": "Email"},
+      {"name": "relationship", "data_type": "varchar", "comment": "與學生關係"},
+      {"name": "created_at", "data_type": "timestamp", "default": "now()"},
+      {"name": "updated_at", "data_type": "timestamp", "default": "now()"}
+    ],
+    "plugin_ctb_students": [
+      {"name": "id", "data_type": "uuid", "nullable": false, "is_pk": true},
+      {"name": "tenant_id", "data_type": "varchar", "nullable": false},
+      {"name": "name", "data_type": "varchar", "nullable": false, "comment": "學生姓名"},
+      {"name": "grade", "data_type": "varchar", "comment": "年級"},
+      {"name": "birth_date", "data_type": "date", "comment": "生日"},
+      {"name": "created_at", "data_type": "timestamp"}
+    ],
+    "plugin_ctb_classes": [
+      {"name": "id", "data_type": "uuid", "nullable": false, "is_pk": true},
+      {"name": "tenant_id", "data_type": "varchar", "nullable": false},
+      {"name": "name", "data_type": "varchar", "nullable": false, "comment": "班級名稱"},
+      {"name": "subject", "data_type": "varchar", "comment": "科目"},
+      {"name": "teacher_id", "data_type": "uuid", "comment": "教師 ID"}
+    ]
+  }
+}
