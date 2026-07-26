@@ -8,11 +8,14 @@ Flow:
   4. Action plan references elements by their ID → executor uses their locators
 """
 
+import asyncio
 import json
-from typing import Any, Dict, Optional
+import re
+from typing import Any, Dict, List, Optional, Tuple
 
-from .page_inspector import crawl_page
+from .page_inspector import inspect_page, crawl_page
 from .prompts import SYSTEM_PROMPT_V2, USER_PROMPT_TEMPLATE_V2
+from .prompts import ANALYSIS_SYSTEM_PROMPT, ANALYSIS_USER_PROMPT
 
 
 class PageAnalyzer:
@@ -31,6 +34,19 @@ class PageAnalyzer:
     ) -> Dict[str, Any]:
         """Inspect the page and return the element map."""
         result = crawl_page(url, login_url, username, password, wait_for_selector)
+        self.last_inspection = result
+        return result
+
+    async def inspect_async(
+        self,
+        url: str,
+        login_url: str = "",
+        username: str = "",
+        password: str = "",
+        wait_for_selector: str = "",
+    ) -> Dict[str, Any]:
+        """Async inspect — safe to call from inside a running event loop."""
+        result = await inspect_page(url, login_url, username, password, wait_for_selector)
         self.last_inspection = result
         return result
 

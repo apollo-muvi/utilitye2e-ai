@@ -27,9 +27,11 @@ from playwright.async_api import async_playwright, Page
 class Executor:
     """Execute an action plan against a real page."""
 
-    def __init__(self, element_map: Dict[str, Any], headless: bool = True):
+    def __init__(self, element_map: Dict[str, Any], headless: bool = True,
+                 storage_state: Optional[Dict] = None):
         self.element_map = element_map
         self.headless = headless
+        self.storage_state = storage_state  # cookies/localStorage from inspector
         self.results: List[Dict] = []
         self.plan: Optional[Dict] = None
         self.screenshot_dir = ""
@@ -62,6 +64,7 @@ class Executor:
             context = await self._browser.new_context(
                 viewport={"width": 1920, "height": 1080},
                 locale="zh-TW",
+                storage_state=self.storage_state or {},
             )
             self._page = await context.new_page()
             self._page.set_default_timeout(15000)
@@ -73,6 +76,14 @@ class Executor:
             elements = self.element_map.get("elements", [])
             steps = plan.get("steps", [])
             plan_url = self.element_map.get("url", "")
+
+            # Navigate to target page first
+            if plan_url and plan_url != "about:blank":
+                try:
+                    await self._page.goto(plan_url, wait_until="domcontentloaded", timeout=15000)
+                    await self._page.wait_for_timeout(1000)
+                except Exception:
+                    pass
 
             for i, step in enumerate(steps):
                 result = await self._do_step(step, i, elements, plan_url)

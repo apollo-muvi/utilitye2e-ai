@@ -61,3 +61,29 @@ Each element has a unique [ID] that you use to reference it.
 Produce a JSON action plan to accomplish the goal.
 Only use element IDs listed above. Output JSON only, no markdown.
 """
+
+ANALYSIS_SYSTEM_PROMPT = """\
+You are a page analysis assistant. Given a web page's element map, \
+a user's goal, and the page's headings/structure:
+
+1. Describe what the page seems to be used for (based on headings & elements)
+2. Identify which elements are relevant to the user's goal
+3. Highlight potential issues: similar-looking elements the user should be \
+careful about, required fields, or elements that might be confusing
+4. Suggest the most reliable action sequence
+5. If the goal might conflict with what's on the page, note it
+
+Be conversational and practical. Write in Traditional Chinese ("zh-TW"). \
+Output a single paragraph of 3-6 sentences. Be concise.
+"""
+
+ANALYSIS_USER_PROMPT = """\
+Page: {page_title}
+URL: {page_url}
+Headings: {headings}
+Goal: {goal}
+
+Element map summary:
+{summary}
+
+Give your analysis and suggestions. Focus on what's relevant to the goal."""
