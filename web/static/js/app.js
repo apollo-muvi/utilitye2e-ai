@@ -57,10 +57,27 @@ async function discover() {
         if (d.error) { statusEl.textContent = "❌ " + d.error; return; }
 
         discoveredElements = d.elements || [];
+        // Detect repeated buttons (matrix operations)
+        const textCounts = {};
+        discoveredElements.forEach(el => {
+            const key = el.text;
+            textCounts[key] = (textCounts[key] || 0) + 1;
+        });
+        const repeated = Object.entries(textCounts).filter(([_, n]) => n > 1);
+        
+        let html = "";
+        if (repeated.length > 0) {
+            html += `<div class="discover-warning">⚠️ 偵測到重複按鈕（矩陣操作），已標注行號:<br>`;
+            repeated.forEach(([text, n]) => { html += `「${text}」x${n} `; });
+            html += `</div>`;
+        }
+        html += discoveredElements.map((el, i) => {
+            const rowInfo = el.row > 0 ? ` <span class="discover-row">行${el.occurrence}</span>` : "";
+            return `<label class="discover-item"><input type="checkbox" value="${i}" checked> <span class="discover-type">${el.type}</span> ${el.text}${rowInfo}</label>`;
+        }).join("");
+        
         statusEl.textContent = `找到 ${discoveredElements.length} 個元件`;
-        resultsEl.innerHTML = discoveredElements.map((el, i) =>
-            `<label class="discover-item"><input type="checkbox" value="${i}" checked> <span class="discover-type">${el.type}</span> ${el.text}</label>`
-        ).join("");
+        resultsEl.innerHTML = html;
         resultsEl.classList.remove("hidden");
     } catch (e) {
         statusEl.textContent = "❌ " + e.message;
@@ -134,6 +151,7 @@ function addStepRow(step) {
     div.innerHTML = `
         <div class="step-row-top">
             <input class="step-btn-text" value="${step.button||""}" placeholder="按鈕文字" data-step="button">
+            <input class="step-row-num" type="number" min="0" value="${step.row||0}" placeholder="行" title="行號 (0=第一個)" data-step="row">
             <button class="step-del" onclick="this.parentElement.parentElement.remove()">✕</button>
         </div>
         <input class="step-desc" value="${step.desc||""}" placeholder="說明" data-step="desc">
@@ -152,6 +170,7 @@ function collectSpec() {
     rows.forEach(row => {
         const step = {
             button: row.querySelector('[data-step="button"]')?.value || "",
+            row: parseInt(row.querySelector('[data-step="row"]')?.value) || 0,
             desc: row.querySelector('[data-step="desc"]')?.value || "",
             fill_fields: [],
         };

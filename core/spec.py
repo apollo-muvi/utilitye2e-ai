@@ -26,6 +26,7 @@ class TestStep:
     button: str = ""       # Button text to click
     desc: str = ""         # Human-readable description
     fill_fields: List[FieldSpec] = field(default_factory=list)
+    row: int = 0           # Row index (1-based) for repeated buttons in table rows; 0 = first match
 
     def validate(self) -> List[str]:
         errs = []

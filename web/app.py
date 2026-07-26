@@ -99,13 +99,20 @@ def create_app(config: dict = None) -> Flask:
 
                 # Build selectable element list
                 elements = []
-                seen_labels = set()
                 skip_labels = {"☰", "登出", "Logout", "Sign out", "取消", "儲存", "Cancel", "Save"}
                 for btn in dom.get("buttons", []):
                     t = btn["text"].strip()
-                    if t and len(t) < 40 and t not in skip_labels and t not in seen_labels:
-                        elements.append({"type": "button", "label": t, "text": t})
-                        seen_labels.add(t)
+                    if t and len(t) < 40 and t not in skip_labels:
+                        el = {"type": "button", "label": t, "text": t}
+                        if btn.get("row", 0) > 0:
+                            el["row"] = btn["row"]
+                            el["occurrence"] = btn.get("occurrence", 1)
+                            el["rowLabel"] = btn.get("rowLabel", "")
+                            el["isRepeated"] = btn.get("isRepeated", False)
+                        elements.append(el)
+                # Also include table row structure
+                for tr in dom.get("tableRows", []):
+                    elements.append({"type": "tableRow", "label": tr.get("label",""), "text": f"行{tr.get('index','')}: {tr.get('label','')} [{', '.join(tr.get('buttons',[]))}]"})
                 for inp in dom.get("inputs", []):
                     label = inp.get("label") or inp.get("placeholder") or inp.get("name") or ""
                     if label:

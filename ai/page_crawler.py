@@ -87,13 +87,46 @@ async def _crawl_page(url: str, login_url: str = "", username: str = "", passwor
 
         # Extract DOM info via JavaScript
         extract_js = """() => {
-            const result = { buttons: [], forms: [], inputs: [], links: [], tables: [] };
-            document.querySelectorAll('button').forEach(btn => {
-                const text = (btn.textContent || '').trim();
-                if (text && text.length < 50) {
-                    result.buttons.push({ text: text, className: btn.className, ariaLabel: btn.getAttribute('aria-label') || '' });
+            const result = { buttons: [], forms: [], inputs: [], links: [], tables: [], tableRows: [] };
+            const seenBtns = {};
+
+            // Detect buttons inside table rows with row context
+            document.querySelectorAll('tr').forEach((tr, rowIdx) => {
+                const cells = tr.querySelectorAll('th, td');
+                if (!cells.length) return;
+                // Get row label (first cell text)
+                const rowLabel = (cells[0].textContent || '').trim().slice(0, 30);
+                const rowBtns = [];
+                tr.querySelectorAll('button').forEach(btn => {
+                    const text = (btn.textContent || '').trim();
+                    if (text && text.length < 50) {
+                        rowBtns.push(text);
+                        // Global button list with row info
+                        const key = text;
+                        if (!seenBtns[key]) seenBtns[key] = 0;
+                        seenBtns[key]++;
+                        result.buttons.push({ text, row: rowIdx, rowLabel, occurrence: seenBtns[key], isRepeated: false });
+                    }
+                });
+                if (rowBtns.length) {
+                    result.tableRows.push({ index: rowIdx, label: rowLabel, buttons: rowBtns });
                 }
             });
+
+            // Non-table buttons
+            document.querySelectorAll('button').forEach(btn => {
+                if (btn.closest('tr')) return; // skip table buttons (already captured)
+                const text = (btn.textContent || '').trim();
+                if (text && text.length < 50) {
+                    result.buttons.push({ text, row: 0, rowLabel: '', occurrence: 1, isRepeated: false });
+                }
+            });
+
+            // Mark repeated buttons
+            const counts = {};
+            result.buttons.forEach(b => { counts[b.text] = (counts[b.text]||0) + 1; });
+            result.buttons.forEach(b => { if (counts[b.text] > 1) b.isRepeated = true; });
+
             document.querySelectorAll('input, select, textarea').forEach(inp => {
                 const label = (() => {
                     if (inp.id) { const lbl = document.querySelector('label[for="' + inp.id + '"]'); if (lbl) return lbl.textContent.trim(); }

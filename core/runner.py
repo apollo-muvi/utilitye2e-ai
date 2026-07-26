@@ -71,7 +71,7 @@ class Runner:
 
     # ─── DOM snapshot ───
     async def _snapshot(self, page: Page) -> str:
-        """Hash of page DOM structure — element count + visible text."""
+        """Hash of page DOM structure — element count + visible text + table cell text."""
         return await page.evaluate("""
             () => {
                 const els = document.querySelectorAll('*');
@@ -83,8 +83,14 @@ class Runner:
                         texts.push(el.innerText.trim());
                     }
                 }
+                // Capture table cell text (detects status changes like 出席/遲到)
+                let cellTexts = [];
+                document.querySelectorAll('td').forEach(td => {
+                    const t = (td.textContent || '').trim().slice(0, 20);
+                    if (t) cellTexts.push(t);
+                });
                 const inputs = document.querySelectorAll('input, textarea, select').length;
-                return JSON.stringify({count, inputs, btns: texts.sort().join('|')});
+                return JSON.stringify({count, inputs, btns: texts.sort().join('|'), cells: cellTexts.join('|')});
             }
         """)
 
@@ -100,7 +106,7 @@ class Runner:
             url_before = page.url
 
             # 2. Find + click button
-            btn = await self._find_button(page, step.button)
+            btn = await self._find_button(page, step.button, step.row)
             if not btn:
                 self.recorder.fail(label, f"找不到按鈕: {step.button}")
                 return
@@ -191,8 +197,22 @@ class Runner:
 
     # ─── Auto-fill visible empty inputs with test data ───
     async def _auto_fill_empty_inputs(self, page: Page):
-        """Fill any visible empty input/textarea/select with generic test data."""
+        """Fill any visible empty input/textarea/select with generic test data.
+        Only fills if a form is open (has visible text inputs)."""
         try:
+            # Only fill if there are visible text inputs (form is open)
+            text_inputs = await page.query_selector_all('input:not([type]), input[type="text"], input[type="email"], input[type="tel"], textarea')
+            has_visible_text = False
+            for el in text_inputs:
+                try:
+                    if await el.is_visible():
+                        has_visible_text = True
+                        break
+                except:
+                    pass
+            if not has_visible_text:
+                return  # No form open, don't touch selects
+
             # 1. Fill selects first (often required)
             selects = await page.query_selector_all("select")
             for sel in selects:
@@ -207,9 +227,8 @@ class Runner:
                                 break
                 except:
                     pass
-            # 2. Fill text inputs (input without type, or type=text/email/tel)
-            els = await page.query_selector_all('input:not([type]), input[type="text"], input[type="email"], input[type="tel"], textarea')
-            for el in els:
+            # 2. Fill text inputs
+            for el in text_inputs:
                 try:
                     if not await el.is_visible():
                         continue
@@ -258,10 +277,30 @@ class Runner:
             pass
         return False
 
-    # ─── Find button ───
-    async def _find_button(self, page: Page, text: str):
+    # ─── Find button (supports row index for repeated buttons) ───
+    async def _find_button(self, page: Page, text: str, row: int = 0):
         if not text:
             return None
+        # If row specified, find buttons inside table rows
+        if row > 0:
+            rows = await page.query_selector_all("tr")
+            # row is 1-based occurrence, not DOM index
+            matched = 0
+            for tr in rows:
+                btns = await tr.query_selector_all("button")
+                for btn in btns:
+                    try:
+                        bt = (await btn.inner_text()).strip()
+                        vis = await btn.is_visible()
+                        if text in bt and vis:
+                            matched += 1
+                            if matched == row:
+                                return btn
+                    except:
+                        continue
+            print(f"    → Row {row} button '{text}' not found (only {matched} matches)")
+            return None
+
         # 1. exact role match
         loc = page.get_by_role("button", name=text, exact=True)
         if await loc.count() > 0 and await loc.first.is_visible():

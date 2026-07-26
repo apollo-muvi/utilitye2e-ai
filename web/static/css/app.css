@@ -227,3 +227,17 @@
     user-select: none;
 }
 .auto-run-label input { width: 16px; height: 16px; cursor: pointer; }
+
+/* Repeated button warning + row badge */
+.discover-warning {
+    background: #fef3c7; border: 1px solid #f59e0b;
+    border-radius: 6px; padding: 8px 12px; margin-bottom: 8px;
+    font-size: .85rem; color: #92400e;
+}
+.discover-row {
+    display: inline-block; background: #6366f1; color: #fff;
+    border-radius: 4px; padding: 1px 6px; font-size: .75rem;
+}
+.step-row-num {
+    width: 50px !important; text-align: center;
+}
