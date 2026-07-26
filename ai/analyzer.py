@@ -1,124 +1,97 @@
 """
-AI Analyzer v2 — uses the Page Inspector's element map instead of guessing CSS selectors.
+AI Analyzer — converts natural language + page DOM into a TestSpec.
 
-Flow:
-  1. Crawl page → get rich element map
-  2. Pass element map to LLM
-  3. LLM picks elements from the map and produces an action plan
-  4. Action plan references elements by their ID → executor uses their locators
+Flow: NL description + DOM crawl → LLM → JSON → TestSpec
 """
 
-import asyncio
 import json
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Optional
 
-from .page_inspector import inspect_page, crawl_page
-from .prompts import SYSTEM_PROMPT_V2, USER_PROMPT_TEMPLATE_V2
-from .prompts import ANALYSIS_SYSTEM_PROMPT, ANALYSIS_USER_PROMPT
+from adapters.llm.base import LLMAdapter
+from core.spec import TestSpec
+from .prompts import SYSTEM_PROMPT, USER_PROMPT_TEMPLATE
 
 
-class PageAnalyzer:
-    """Analyze a page's DOM via Playwright and AI."""
+class Analyzer:
+    """Generate TestSpec from natural language + DOM via LLM."""
 
-    def __init__(self):
-        self.last_inspection: Dict[str, Any] = {}
+    def __init__(self, llm: LLMAdapter, schema=None):
+        self.llm = llm
+        self.schema = schema  # kept for backward compat, unused in v2
 
-    def inspect(
+    def generate(
         self,
-        url: str,
+        description: str,
+        target_url: str = "",
         login_url: str = "",
         username: str = "",
         password: str = "",
-        wait_for_selector: str = "",
-    ) -> Dict[str, Any]:
-        """Inspect the page and return the element map."""
-        result = crawl_page(url, login_url, username, password, wait_for_selector)
-        self.last_inspection = result
-        return result
+        selected_elements: list = None,
+    ) -> TestSpec:
+        # Crawl the page to get real DOM structure
+        dom_json = "[]"
+        if target_url:
+            try:
+                print(f"  → Crawling DOM: {target_url}")
+                from .page_crawler import crawl_page
+                dom_info = crawl_page(
+                    url=target_url,
+                    login_url=login_url,
+                    username=username,
+                    password=password,
+                )
+                dom_json = json.dumps(dom_info, ensure_ascii=False, indent=2)
+                btn_count = len(dom_info.get("buttons", []))
+                print(f"  → DOM crawl complete: {btn_count} buttons found")
+            except Exception as e:
+                dom_json = json.dumps({"error": f"Crawl failed: {e}"}, ensure_ascii=False)
+                print(f"  → DOM crawl failed: {e}")
 
-    async def inspect_async(
-        self,
-        url: str,
-        login_url: str = "",
-        username: str = "",
-        password: str = "",
-        wait_for_selector: str = "",
-    ) -> Dict[str, Any]:
-        """Async inspect — safe to call from inside a running event loop."""
-        result = await inspect_page(url, login_url, username, password, wait_for_selector)
-        self.last_inspection = result
-        return result
+        # Build prompt
+        selected_str = "（使用者未選取特定元件，請分析全部 DOM）"
+        if selected_elements:
+            selected_str = json.dumps(selected_elements, ensure_ascii=False, indent=2)
 
-    def summarize(self, inspection: Optional[Dict[str, Any]] = None) -> str:
-        """Create a concise page summary for LLM consumption."""
-        data = inspection or self.last_inspection
-        if not data:
-            return "No page data."
+        user_prompt = USER_PROMPT_TEMPLATE.format(
+            description=description,
+            target_url=target_url,
+            dom_json=dom_json,
+            login_url=login_url,
+            selected_elements=selected_str,
+        )
 
-        lines = []
-        lines.append(f"# Page: {data.get('title', '')}")
-        lines.append(f"URL: {data.get('url', '')}")
-        lines.append("")
+        # Call LLM
+        print("  → Calling LLM for step generation...")
+        raw_response = self.llm.chat(SYSTEM_PROMPT, user_prompt, temperature=0.2)
 
-        # Add page structure
-        for h in data.get("headings", []):
-            indent = "  " if h["level"] == "h2" else ""
-            indent = "    " if h["level"] == "h3" else indent
-            lines.append(f"{indent}## {h['text']}")
+        # Parse JSON
+        spec_dict = self._extract_json(raw_response)
 
-        lines.append("")
-        lines.append("## Interactive Elements")
-        lines.append("")
+        # Inject credentials
+        target = spec_dict.get("target", {})
+        if username:
+            target["username"] = username
+        if password:
+            target["password"] = password
+        if not target.get("url") and target_url:
+            target["url"] = target_url
 
-        for el in data.get("elements", []):
-            parts = [f"[{el['id']}]"]
-            parts.append(f"<{el['tag']}>")
+        # Build and validate
+        spec = TestSpec.from_dict(spec_dict)
+        errors = spec.validate()
+        if errors:
+            raise ValueError(f"Invalid spec generated: {errors}")
 
-            if el.get("role"):
-                parts.append(f"role={el['role']}")
-            if el.get("type"):
-                parts.append(f"type={el['type']}")
-            if el.get("name"):
-                parts.append(f"name={el['name']}")
-            if el.get("label"):
-                parts.append(f"label=\"{el['label']}\"")
-            if el.get("text"):
-                parts.append(f"text=\"{el['text']}\"")
-            if el.get("placeholder"):
-                parts.append(f"placeholder=\"{el['placeholder']}\"")
-            if el.get("data_testid"):
-                parts.append(f"data-testid={el['data_testid']}")
-            if el.get("options"):
-                parts.append(f"options={el['options'][:5]}{'...' if len(el['options']) > 5 else ''}")
-            if el.get("required"):
-                parts.append("required")
-            if not el["is_visible"]:
-                parts.append("HIDDEN")
+        print(f"  → Spec: {spec.name} with {len(spec.steps)} steps")
+        return spec
 
-            lines.append("  " + " ".join(parts))
-
-        lines.append("")
-        lines.append(f"Total: {data.get('total_elements', 0)} elements")
-
-        return "\n".join(lines)
-
-    def generate_plan(
-        self,
-        llm_chat_fn,
-        goal: str,
-        page_summary: str,
-    ) -> Dict[str, Any]:
-        """Ask AI to produce an action plan using element IDs from the map."""
-        prompt = USER_PROMPT_TEMPLATE_V2.format(goal=goal, page_summary=page_summary)
-        raw = llm_chat_fn(SYSTEM_PROMPT_V2, prompt, temperature=0.2)
-
-        # Extract JSON from response
-        import re
-        text = re.sub(r"^```(?:json)?\s*", "", raw.strip())
-        text = re.sub(r"\s*```$", "", text)
-        match = re.search(r"\{[\s\S]*\}", text)
+    @staticmethod
+    def _extract_json(text: str) -> dict:
+        """Extract JSON from LLM response, handling markdown fences."""
+        text = re.sub(r'^```(?:json)?\s*', '', text.strip())
+        text = re.sub(r'\s*```$', '', text)
+        match = re.search(r'\{[\s\S]*\}', text)
         if not match:
-            raise ValueError(f"No JSON found in LLM response:\n{raw[:500]}")
-
+            raise ValueError(f"No JSON found in LLM response:\n{text[:500]}")
         return json.loads(match.group())

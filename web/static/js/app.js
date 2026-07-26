@@ -1,136 +1,170 @@
 // utilitye2e-ai frontend — prototype
 
 let currentSpec = null;
-const ALL_ACTIONS = ["add_cancel", "add_save", "edit_cancel", "delete", "page_load"];
-const UI_LABELS = {
-    add_button: "新增按鈕", modal_title_regex: "Modal 標題 regex", save_button: "儲存按鈕",
-    cancel_button: "取消按鈕", edit_button: "編輯按鈕", delete_button: "刪除按鈕",
-    edit_title_regex: "編輯標題 regex", update_button: "更新按鈕"
-};
 
 // ─── Init ───
 document.addEventListener("DOMContentLoaded", async () => {
-    await loadTables();
     document.getElementById("btn-analyze").addEventListener("click", analyze);
     document.getElementById("btn-run").addEventListener("click", runTest);
     document.getElementById("btn-save").addEventListener("click", saveSpec);
     document.getElementById("btn-clear-results").addEventListener("click", clearResults);
     document.getElementById("btn-save-results").addEventListener("click", saveResults);
+    document.getElementById("btn-logout").addEventListener("click", logout);
+    document.getElementById("btn-add-step").addEventListener("click", () => addStepRow({button:"",desc:"",fill_fields:[]}));
+    document.getElementById("btn-discover").addEventListener("click", discover);
 });
 
-// ─── Load tables ───
-async function loadTables() {
+let discoveredElements = [];
+
+// ─── Logout ───
+async function logout() {
+    if (!confirm("確定要關閉伺服器嗎？")) return;
+    try { await fetch("/api/shutdown", { method: "POST" }); } catch (e) {}
+    document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;gap:1rem;font-family:system-ui;color:#64748b;"><div style="font-size:3rem;">⏻</div><p>伺服器已關閉</p><p style="font-size:.8rem;color:#94a3b8;">請回到終端重新啟動</p></div>';
+}
+
+// ─── Collect auth fields ───
+function getAuth() {
+    return {
+        target_url: document.getElementById("txt-url").value.trim(),
+        login_url: document.getElementById("txt-login-url").value.trim(),
+        username: document.getElementById("txt-username").value.trim(),
+        password: document.getElementById("txt-password").value,
+    };
+}
+
+// ─── Discover ───
+async function discover() {
+    const auth = getAuth();
+    const statusEl = document.getElementById("discover-status");
+    const resultsEl = document.getElementById("discover-results");
+    const btn = document.getElementById("btn-discover");
+
+    if (!auth.target_url) { statusEl.textContent = "請先輸入 Target URL"; return; }
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>探索中';
+    statusEl.innerHTML = '<span class="spinner"></span>探索中...';
+    resultsEl.classList.add("hidden");
+
     try {
-        const r = await fetch("/api/tables");
+        const r = await fetch("/api/ai/discover", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(auth)
+        });
         const d = await r.json();
-        const sel = document.getElementById("sel-table");
-        if (d.error) { sel.innerHTML = `<option>${d.error}</option>`; return; }
-        sel.innerHTML = '<option value="">選擇 table...</option>' +
-            d.tables.map(t => `<option value="${t}">${t}</option>`).join("");
-    } catch (e) { console.error(e); }
+        if (d.logs) showLogs(d.logs, "step-describe");
+        if (d.error) { statusEl.textContent = "❌ " + d.error; return; }
+
+        discoveredElements = d.elements || [];
+        statusEl.textContent = `找到 ${discoveredElements.length} 個元件`;
+        resultsEl.innerHTML = discoveredElements.map((el, i) =>
+            `<label class="discover-item"><input type="checkbox" value="${i}" checked> <span class="discover-type">${el.type}</span> ${el.text}</label>`
+        ).join("");
+        resultsEl.classList.remove("hidden");
+    } catch (e) {
+        statusEl.textContent = "❌ " + e.message;
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '🔍 探索元件';
+    }
 }
 
 // ─── Analyze ───
 async function analyze() {
-    const table = document.getElementById("sel-table").value;
     const desc = document.getElementById("txt-description").value.trim();
-    const urlPath = document.getElementById("txt-url").value.trim();
+    const auth = getAuth();
     const errEl = document.getElementById("analyze-error");
     const btn = document.getElementById("btn-analyze");
 
     errEl.classList.add("hidden");
-    // Allow either table OR url_path, not both required
-    if (!table && !urlPath) { 
-        errEl.textContent = "請選擇 table 或輸入 URL 路徑"; 
-        errEl.classList.remove("hidden"); 
-        return; 
-    }
-    if (!desc) { errEl.textContent = "請輸入描述"; errEl.classList.remove("hidden"); return; }
+    if (!auth.target_url) { errEl.textContent = "請輸入 Target URL"; errEl.classList.remove("hidden"); return; }
 
-    btn.disabled = true; btn.textContent = "AI 分析中...";
-    console.log("[DEBUG] Starting AI analyze:", { table, urlPath, desc: desc.substring(0, 50) + "..." });
+    // Collect checked elements from discover
+    const selected = [];
+    document.querySelectorAll("#discover-results input:checked").forEach(cb => {
+        selected.push(discoveredElements[parseInt(cb.value)]);
+    });
+
+    // description optional if elements selected
+    if (!desc && selected.length === 0) { errEl.textContent = "請選取元件或輸入描述"; errEl.classList.remove("hidden"); return; }
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>AI 分析中...';
     try {
         const r = await fetch("/api/ai/analyze", {
             method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ description: desc, table, url_path: urlPath })
+            body: JSON.stringify({ ...auth, description: desc, selected_elements: selected })
         });
-        console.log("[DEBUG] Response status:", r.status);
         const d = await r.json();
-        console.log("[DEBUG] Response data:", d);
+        if (d.logs) showLogs(d.logs, "step-describe");
         if (d.error) { errEl.textContent = d.error; errEl.classList.remove("hidden"); return; }
         currentSpec = d.spec;
-        console.log("[DEBUG] Spec loaded:", currentSpec?.name, `${currentSpec?.fields?.length || 0} fields`);
-        renderSpec(currentSpec);
+        renderSteps(currentSpec);
         document.getElementById("step-spec").classList.remove("hidden");
+        // Auto-run if checked
+        if (document.getElementById("chk-autorun").checked) {
+            runTest();
+        }
     } catch (e) {
-        console.error("[DEBUG] Analyze failed:", e);
         errEl.textContent = e.message; errEl.classList.remove("hidden");
     } finally {
-        btn.disabled = false; btn.textContent = "AI 分析";
+        btn.disabled = false; btn.innerHTML = '🤖 AI 分析';
     }
 }
 
-// ─── Render Spec Form ───
-function renderSpec(spec) {
+// ─── Render Steps ───
+function renderSteps(spec) {
     document.getElementById("sp-name").value = spec.name;
     document.getElementById("sp-url").value = spec.target.url;
-    document.getElementById("sp-table").value = spec.table;
-
-    // Fields table
-    const tbody = document.querySelector("#spec-fields tbody");
-    tbody.innerHTML = spec.fields.map((f, i) => `
-        <tr>
-            <td>${f.name}</td>
-            <td><input value="${f.label || ""}" data-fld="label" data-idx="${i}"></td>
-            <td><input value="${f.selector || ""}" data-fld="selector" data-idx="${i}" style="width:100%"></td>
-            <td><input value="${f.value || ""}" data-fld="value" data-idx="${i}"></td>
-            <td><input value="${f.field_type || "text"}" data-fld="field_type" data-idx="${i}"></td>
-            <td><input type="checkbox" ${f.required ? "checked" : ""} data-fld="required" data-idx="${i}"></td>
-        </tr>
-    `).join("");
-
-    // UI elements
-    const uiDiv = document.getElementById("spec-ui");
-    uiDiv.innerHTML = Object.entries(spec.ui || {}).map(([k, v]) => `
-        <div class="field">
-            <label>${UI_LABELS[k] || k}</label>
-            <input value="${v || ""}" data-ui="${k}">
-        </div>
-    `).join("");
-
-    // Actions
-    const actDiv = document.getElementById("spec-actions");
-    actDiv.innerHTML = ALL_ACTIONS.map(a => `
-        <span class="action-tag ${(spec.actions || []).includes(a) ? "active" : ""}" data-action="${a}">${a}</span>
-    `).join("");
-    actDiv.querySelectorAll(".action-tag").forEach(el => {
-        el.addEventListener("click", () => el.classList.toggle("active"));
-    });
+    const container = document.getElementById("steps-container");
+    container.innerHTML = "";
+    if (spec.steps && spec.steps.length) {
+        spec.steps.forEach(step => addStepRow(step));
+    }
 }
 
-// ─── Collect spec from form ───
+function addStepRow(step) {
+    const container = document.getElementById("steps-container");
+    const div = document.createElement("div");
+    div.className = "step-row";
+    const fieldsHTML = (step.fill_fields || []).map((f,i) =>
+        `<div class="step-field"><input value="${f.selector||""}" placeholder="selector" data-step-field="selector" data-fi="${i}"><input value="${f.value||""}" placeholder="值" data-step-field="value" data-fi="${i}"></div>`
+    ).join("");
+    div.innerHTML = `
+        <div class="step-row-top">
+            <input class="step-btn-text" value="${step.button||""}" placeholder="按鈕文字" data-step="button">
+            <button class="step-del" onclick="this.parentElement.parentElement.remove()">✕</button>
+        </div>
+        <input class="step-desc" value="${step.desc||""}" placeholder="說明" data-step="desc">
+        <div class="step-fields">${fieldsHTML}</div>
+    `;
+    container.appendChild(div);
+}
+
+// ─── Collect steps from UI ───
 function collectSpec() {
     const spec = { ...currentSpec };
     spec.name = document.getElementById("sp-name").value;
     spec.target = { ...spec.target, url: document.getElementById("sp-url").value };
-    spec.table = document.getElementById("sp-table").value;
-
-    // Fields
-    spec.fields = currentSpec.fields.map((f, i) => {
-        const updated = { ...f };
-        document.querySelectorAll(`[data-idx="${i}"]`).forEach(el => {
-            const fld = el.dataset.fld;
-            updated[fld] = el.type === "checkbox" ? el.checked : el.value;
+    const rows = document.querySelectorAll(".step-row");
+    spec.steps = [];
+    rows.forEach(row => {
+        const step = {
+            button: row.querySelector('[data-step="button"]')?.value || "",
+            desc: row.querySelector('[data-step="desc"]')?.value || "",
+            fill_fields: [],
+        };
+        row.querySelectorAll(".step-field").forEach(sf => {
+            step.fill_fields.push({
+                name: "", label: "",
+                selector: sf.querySelector('[data-step-field="selector"]')?.value || "",
+                value: sf.querySelector('[data-step-field="value"]')?.value || "",
+                field_type: "text", required: false, options: [],
+            });
         });
-        return updated;
+        spec.steps.push(step);
     });
-
-    // UI
-    spec.ui = {};
-    document.querySelectorAll("[data-ui]").forEach(el => { spec.ui[el.dataset.ui] = el.value; });
-
-    // Actions
-    spec.actions = [...document.querySelectorAll(".action-tag.active")].map(el => el.dataset.action);
     return spec;
 }
 
@@ -138,7 +172,8 @@ function collectSpec() {
 async function runTest() {
     const btn = document.getElementById("btn-run");
     const spec = collectSpec();
-    btn.disabled = true; btn.textContent = "執行中...";
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>執行中';
     document.getElementById("step-results").classList.remove("hidden");
 
     try {
@@ -147,10 +182,11 @@ async function runTest() {
             body: JSON.stringify({ spec })
         });
         const d = await r.json();
+        if (d.logs) showLogs(d.logs, "step-results");
         if (d.error) { alert(d.error); return; }
         renderResults(d);
     } catch (e) { alert(e.message); }
-    finally { btn.disabled = false; btn.textContent = "▶ 執行測試"; }
+    finally { btn.disabled = false; btn.innerHTML = '▶ 執行測試'; }
 }
 
 function renderResults(data) {
@@ -209,5 +245,31 @@ function saveResults() {
     a.href = URL.createObjectURL(blob);
     a.download = `results_${new Date().toISOString().slice(0,10)}.json`;
     a.click();
+}
+
+// ─── Show logs in UI ───
+function showLogs(logs, containerId) {
+    if (!logs || !logs.length) return;
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    let panel = container.querySelector(".log-panel");
+    if (!panel) {
+        panel = document.createElement("div");
+        panel.className = "log-panel";
+        panel.innerHTML = `
+            <div class="log-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                <span>📋 執行記錄 (${logs.length} lines)</span>
+                <span class="log-toggle">▾</span>
+            </div>
+            <pre class="log-body"></pre>
+        `;
+        container.appendChild(panel);
+    }
+    const body = panel.querySelector(".log-body");
+    const header = panel.querySelector(".log-header span:first-child");
+    body.textContent = logs.join("\n");
+    header.textContent = `📋 執行記錄 (${logs.length} lines)`;
+    panel.classList.remove("collapsed");
 }
 

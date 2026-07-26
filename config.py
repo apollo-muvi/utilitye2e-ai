@@ -42,13 +42,6 @@ def load_config(config_path: str = "config.yaml") -> Dict[str, Any]:
     config["llm"].setdefault("model", "")
     config["llm"].setdefault("base_url", "")
 
-    # Fill target config from env
-    config.setdefault("target", {})
-    config["target"].setdefault("base_url", os.getenv("TARGET_BASE_URL", ""))
-    config["target"].setdefault("login_url", "")
-    config["target"].setdefault("username", os.getenv("TARGET_USERNAME", ""))
-    config["target"].setdefault("password", os.getenv("TARGET_PASSWORD", ""))
-
     # Web config
     config.setdefault("web", {})
     config["web"].setdefault("host", os.getenv("FLASK_HOST", "0.0.0.0"))

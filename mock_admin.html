@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mock Admin Panel - Universal</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; background: #f5f5f5; display: flex; min-height: 100vh; }
+        
+        /* Sidebar */
+        .sidebar { width: 250px; background: #1e293b; color: white; padding: 1rem; }
+        .sidebar h1 { font-size: 1.2rem; margin-bottom: 2rem; padding-bottom: 1rem; border-bottom: 1px solid #334155; }
+        .nav-item { padding: 0.75rem 1rem; margin: 0.25rem 0; border-radius: 6px; cursor: pointer; color: #94a3b8; }
+        .nav-item:hover, .nav-item.active { background: #334155; color: white; }
+        
+        /* Main content */
+        .main { flex: 1; padding: 2rem; }
+        .card { background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); padding: 1.5rem; margin-bottom: 2rem; }
+        
+        /* Toolbar */
+        .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 1rem; }
+        .search-box { display: flex; gap: 0.5rem; }
+        .search-box input { padding: 0.5rem; border: 1px solid #e2e8f0; border-radius: 4px; width: 250px; }
+        
+        /* Buttons */
+        .btn { padding: 0.5rem 1rem; border: none; border-radius: 4px; cursor: pointer; font-size: 0.9rem; }
+        .btn-primary { background: #3b82f6; color: white; }
+        .btn-success { background: #22c55e; color: white; }
+        .btn-danger { background: #ef4444; color: white; }
+        .btn-secondary { background: #64748b; color: white; }
+        .btn-sm { padding: 0.25rem 0.5rem; font-size: 0.8rem; }
+        
+        /* Table */
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 0.75rem; text-align: left; border-bottom: 1px solid #e2e8f0; }
+        th { background: #f8fafc; font-weight: 600; }
+        .actions { display: flex; gap: 0.5rem; }
+        .status-badge { padding: 0.25rem 0.5rem; border-radius: 12px; font-size: 0.75rem; }
+        .status-active { background: #dcfce7; color: #166534; }
+        .status-inactive { background: #fee2e2; color: #991b1b; }
+        
+        /* Forms */
+        .form-section { margin-bottom: 1.5rem; padding-bottom: 1.5rem; border-bottom: 1px solid #e2e8f0; }
+        .form-section:last-child { border-bottom: none; }
+        .form-section h3 { margin-bottom: 1rem; font-size: 1rem; color: #1e293b; }
+        .form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; }
+        .form-full { grid-column: span 2; }
+        .form-group { margin-bottom: 1rem; }
+        .form-group label { display: block; margin-bottom: 0.5rem; font-weight: 500; color: #475569; }
+        .form-group input, .form-group select, .form-group textarea {
+            width: 100%; padding: 0.5rem; border: 1px solid #e2e8f0; border-radius: 4px; font-size: 0.9rem;
+        }
+        .form-group textarea { min-height: 80px; resize: vertical; }
+        
+        /* Toggle switch */
+        .toggle { position: relative; width: 44px; height: 24px; }
+        .toggle input { opacity: 0; width: 0; height: 0; }
+        .toggle-slider {
+            position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #cbd5e1; transition: .4s; border-radius: 24px;
+        }
+        .toggle-slider:before {
+            position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px;
+            background-color: white; transition: .4s; border-radius: 50%;
+        }
+        .toggle input:checked + .toggle-slider { background-color: #22c55e; }
+        .toggle input:checked + .toggle-slider:before { transform: translateX(20px); }
+        
+        /* Modal */
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000; }
+        .modal.active { display: flex; align-items: center; justify-content: center; }
+        .modal-content { background: white; border-radius: 8px; padding: 1.5rem; width: 500px; max-width: 90%; max-height: 90vh; overflow-y: auto; }
+        .modal-header { font-size: 1.2rem; font-weight: 600; margin-bottom: 1rem; }
+        .modal-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1.5rem; }
+        
+        /* Required */
+        .required::after { content: " *"; color: #ef4444; }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <h1>Admin Panel</h1>
+        <div class="nav-item {% if current_page == 'users' %}active{% endif %}" onclick="navigate('users')">👥 Users</div>
+        <div class="nav-item {% if current_page == 'settings' %}active{% endif %}" onclick="navigate('settings')">⚙️ Settings</div>
+        <div class="nav-item {% if current_page == 'logs' %}active{% endif %}" onclick="navigate('logs')">📋 Logs</div>
+    </div>
+
+    <div class="main">
+        <!-- Users Page -->
+        <div id="page-users" class="page" style="display: {% if current_page == 'users' %}block{% else %}none{% endif %}">
+            <div class="card">
+                <div class="toolbar">
+                    <h2>Users Management</h2>
+                    <div class="search-box">
+                        <input type="text" placeholder="Search users..." id="user-search">
+                        <button class="btn btn-primary" onclick="openUserModal()">新增</button>
+                    </div>
+                </div>
+
+                <table id="users-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Username</th>
+                            <th>Email</th>
+                            <th>Role</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for user in users %}
+                        <tr data-id="{{ user.id }}">
+                            <td>{{ user.id }}</td>
+                            <td>{{ user.username }}</td>
+                            <td>{{ user.email }}</td>
+                            <td>{{ user.role }}</td>
+                            <td><span class="status-badge status-{{ user.status }}">{{ user.status }}</span></td>
+                            <td class="actions">
+                                <button class="btn btn-secondary btn-sm" onclick="openUserModal({{ user.id }})">編輯</button>
+                                <button class="btn btn-success btn-sm" onclick="toggleUser({{ user.id }})">切換狀態</button>
+                                <button class="btn btn-danger btn-sm" onclick="deleteUser({{ user.id }})">刪除</button>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Settings Page -->
+        <div id="page-settings" class="page" style="display: {% if current_page == 'settings' %}block{% else %}none{% endif %}">
+            <div class="card">
+                <div class="toolbar">
+                    <h2>System Settings</h2>
+                    <div>
+                        <button class="btn btn-secondary" onclick="resetSettings()">Reset</button>
+                        <button class="btn btn-primary" onclick="saveSettings()">Save Changes</button>
+                    </div>
+                </div>
+
+                <form id="settings-form">
+                    <div class="form-section">
+                        <h3>General Settings</h3>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label>Site Name</label>
+                                <input type="text" name="site_name" value="{{ settings.site_name }}">
+                            </div>
+                            <div class="form-group">
+                                <label>Max Users</label>
+                                <input type="number" name="max_users" value="{{ settings.max_users }}">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <h3>Security Settings</h3>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label>Session Timeout (minutes)</label>
+                                <input type="number" name="session_timeout" value="{{ settings.session_timeout }}">
+                            </div>
+                            <div class="form-group">
+                                <label>Allowed IPs (comma-separated)</label>
+                                <input type="text" name="allowed_ips" value="{{ settings.allowed_ips }}">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-section">
+                        <h3>Registration</h3>
+                        <div class="form-group">
+                            <label style="display: flex; align-items: center; gap: 0.5rem;">
+                                <label class="toggle">
+                                    <input type="checkbox" name="enable_registration" {% if settings.enable_registration %}checked{% endif %}>
+                                    <span class="toggle-slider"></span>
+                                </label>
+                                Enable Public Registration
+                            </label>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <!-- Logs Page -->
+        <div id="page-logs" class="page" style="display: {% if current_page == 'logs' %}block{% else %}none{% endif %}">
+            <div class="card">
+                <div class="toolbar">
+                    <h2>System Logs</h2>
+                    <div class="search-box">
+                        <select id="log-filter" onchange="filterLogs()">
+                            <option value="">All Actions</option>
+                            <option value="login">Login</option>
+                            <option value="logout">Logout</option>
+                            <option value="create_user">Create User</option>
+                            <option value="update_settings">Update Settings</option>
+                        </select>
+                    </div>
+                </div>
+
+                <table id="logs-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Timestamp</th>
+                            <th>User</th>
+                            <th>Action</th>
+                            <th>IP</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for log in logs %}
+                        <tr>
+                            <td>{{ log.id }}</td>
+                            <td>{{ log.timestamp }}</td>
+                            <td>{{ log.user }}</td>
+                            <td>{{ log.action }}</td>
+                            <td>{{ log.ip }}</td>
+                            <td><span class="status-badge status-{{ 'active' if log.status == 'success' else 'inactive' }}">{{ log.status }}</span></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- User Modal -->
+    <div class="modal" id="user-modal">
+        <div class="modal-content">
+            <div class="modal-header" id="user-modal-title">新增用戶</div>
+            <form id="user-form">
+                <input type="hidden" name="id" id="user-id">
+                <div class="form-group">
+                    <label class="required">用戶名</label>
+                    <input type="text" name="username" id="user-username" required>
+                </div>
+                <div class="form-group">
+                    <label class="required">電子郵件</label>
+                    <input type="email" name="email" id="user-email" required>
+                </div>
+                <div class="form-group">
+                    <label>角色</label>
+                    <select name="role" id="user-role">
+                        <option value="admin">管理員</option>
+                        <option value="user">用戶</option>
+                        <option value="guest">訪客</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>狀態</label>
+                    <select name="status" id="user-status">
+                        <option value="active">啟用</option>
+                        <option value="inactive">停用</option>
+                    </select>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeUserModal()">取消</button>
+                    <button type="submit" class="btn btn-primary">儲存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        function navigate(page) {
+            window.location.href = '/page/' + page;
+        }
+
+        // User CRUD
+        function openUserModal(id = null) {
+            const modal = document.getElementById('user-modal');
+            const title = document.getElementById('user-modal-title');
+            const form = document.getElementById('user-form');
+
+            modal.classList.add('active');
+
+            if (id) {
+                title.textContent = '編輯用戶';
+                const row = document.querySelector(`#users-table tr[data-id="${id}"]`);
+                document.getElementById('user-id').value = id;
+                document.getElementById('user-username').value = row.cells[1].textContent;
+                document.getElementById('user-email').value = row.cells[2].textContent;
+                document.getElementById('user-role').value = row.cells[3].textContent;
+                document.getElementById('user-status').value = row.querySelector('.status-badge').classList.contains('status-active') ? 'active' : 'inactive';
+            } else {
+                title.textContent = '新增用戶';
+                form.reset();
+                document.getElementById('user-id').value = '';
+            }
+        }
+
+        function closeUserModal() {
+            document.getElementById('user-modal').classList.remove('active');
+        }
+
+        async function saveUser(e) {
+            e.preventDefault();
+            const id = document.getElementById('user-id').value;
+            const data = {
+                username: document.getElementById('user-username').value,
+                email: document.getElementById('user-email').value,
+                role: document.getElementById('user-role').value,
+                status: document.getElementById('user-status').value
+            };
+
+            const url = id ? `/api/users/${id}` : '/api/users';
+            const method = id ? 'PUT' : 'POST';
+            const res = await fetch(url, { method, headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) });
+            const result = await res.json();
+            if (result.success) location.reload();
+        }
+
+        async function deleteUser(id) {
+            if (!confirm('Delete this user?')) return;
+            const res = await fetch(`/api/users/${id}`, { method: 'DELETE' });
+            if (await res.json().success) location.reload();
+        }
+
+        async function toggleUser(id) {
+            const res = await fetch(`/api/users/${id}/toggle`, { method: 'POST' });
+            if (await res.json().success) location.reload();
+        }
+
+        // Settings
+        async function saveSettings() {
+            const form = document.getElementById('settings-form');
+            const data = {
+                site_name: form.site_name.value,
+                max_users: parseInt(form.max_users.value),
+                session_timeout: parseInt(form.session_timeout.value),
+                allowed_ips: form.allowed_ips.value,
+                enable_registration: form.enable_registration.checked
+            };
+            const res = await fetch('/api/settings', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) });
+            alert(await res.json().success ? 'Settings saved!' : 'Failed to save');
+        }
+
+        function resetSettings() {
+            if (confirm('Reset to defaults?')) location.reload();
+        }
+
+        // Logs filter
+        async function filterLogs() {
+            const type = document.getElementById('log-filter').value;
+            const url = type ? `/api/logs?type=${type}` : '/api/logs';
+            const res = await fetch(url);
+            const data = await res.json();
+            const tbody = document.querySelector('#logs-table tbody');
+            tbody.innerHTML = data.data.map(log => `
+                <tr>
+                    <td>${log.id}</td>
+                    <td>${log.timestamp}</td>
+                    <td>${log.user}</td>
+                    <td>${log.action}</td>
+                    <td>${log.ip}</td>
+                    <td><span class="status-badge status-${log.status === 'success' ? 'active' : 'inactive'}">${log.status}</span></td>
+                </tr>
+            `).join('');
+        }
+
+        document.getElementById('user-form').addEventListener('submit', saveUser);
+    </script>
+</body>
+</html>

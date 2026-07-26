@@ -1,0 +1,26 @@
+{
+  "tables": {
+    "users": [
+      {"name": "id", "data_type": "integer", "nullable": false, "is_pk": true, "comment": "User ID"},
+      {"name": "username", "data_type": "varchar", "nullable": false, "comment": "Login username"},
+      {"name": "email", "data_type": "varchar", "nullable": false, "comment": "Email address"},
+      {"name": "role", "data_type": "varchar", "comment": "User role (admin/user/guest)"},
+      {"name": "status", "data_type": "varchar", "comment": "Account status (active/inactive)"}
+    ],
+    "settings": [
+      {"name": "site_name", "data_type": "varchar", "comment": "Site name"},
+      {"name": "max_users", "data_type": "integer", "comment": "Maximum users allowed"},
+      {"name": "enable_registration", "data_type": "boolean", "comment": "Enable public registration"},
+      {"name": "session_timeout", "data_type": "integer", "comment": "Session timeout in minutes"},
+      {"name": "allowed_ips", "data_type": "varchar", "comment": "Allowed IP ranges"}
+    ],
+    "logs": [
+      {"name": "id", "data_type": "integer", "nullable": false, "is_pk": true, "comment": "Log ID"},
+      {"name": "timestamp", "data_type": "timestamp", "comment": "Log timestamp"},
+      {"name": "user", "data_type": "varchar", "comment": "Username who performed action"},
+      {"name": "action", "data_type": "varchar", "comment": "Action type"},
+      {"name": "ip", "data_type": "varchar", "comment": "IP address"},
+      {"name": "status", "data_type": "varchar", "comment": "Action status (success/failed)"}
+    ]
+  }
+}

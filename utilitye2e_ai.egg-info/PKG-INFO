@@ -1,0 +1,119 @@
+Metadata-Version: 2.4
+Name: utilitye2e-ai
+Version: 0.1.0
+Summary: Open-source E2E test generator: AI + DB schema → Playwright CRUD tests
+License: MIT
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown
+Requires-Dist: flask>=3.0.0
+Requires-Dist: flask-cors>=4.0.0
+Requires-Dist: playwright>=1.40.0
+Requires-Dist: pyyaml>=6.0
+Requires-Dist: requests>=2.28.0
+Provides-Extra: postgres
+Requires-Dist: psycopg2-binary>=2.9; extra == "postgres"
+Provides-Extra: mysql
+Requires-Dist: mysql-connector-python>=8.0; extra == "mysql"
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.21; extra == "dev"
+
+# utilitye2e-ai
+
+Open-source E2E test generator — AI analyzes your DB schema + natural language, generates and runs CRUD tests with Playwright.
+
+## How it works
+
+```
+Natural Language + DB Schema
+        ↓ (LLM)
+   Test Spec (JSON)
+        ↓ (Form UI — optional tuning)
+   Playwright Runner
+        ↓
+   Test Report
+```
+
+The **Test Spec** is the central contract: a human-readable, editable JSON that describes what to test. The AI generates it; you can review and tweak it; the runner executes it. Specs can be saved, shared, and version-controlled.
+
+## Quick start
+
+```bash
+# Install
+pip install -e .
+
+# Configure
+cp config.example.yaml config.yaml
+# Edit config.yaml — set your DB, LLM provider, target URL
+
+# Run Web UI
+utilitye2e-ai web
+
+# Or use CLI directly
+utilitye2e-ai analyze --description "測試家長管理的新增、編輯、刪除" --table parents
+utilitye2e-ai run --spec spec.json
+```
+
+## Architecture
+
+```
+core/
+├── spec.py        # TestSpec dataclass (the contract)
+├── runner.py      # Playwright execution engine
+└── recorder.py    # Test result recorder
+
+adapters/
+├── schema/        # DB abstraction (PostgreSQL, SQLite, Manual)
+└── llm/           # LLM abstraction (GLM, OpenAI, Ollama)
+
+ai/
+├── analyzer.py    # NL + schema → TestSpec
+└── prompts.py     # System prompts
+
+web/               # Flask SPA (AI Dialog + Spec Form + Reports)
+cli.py             # CLI entry point
+config.yaml        # User configuration
+```
+
+### Three pluggable layers
+
+| Layer | Responsibility | Built-in | Extensible to |
+|-------|---------------|----------|--------------|
+| **SchemaAdapter** | Read table/column info | PostgreSQL, SQLite, Manual JSON | MySQL, etc. |
+| **LLMAdapter** | Analyze NL → TestSpec | GLM (z.ai), OpenAI, Ollama (local) | Any provider |
+| **TestSpec** | Test description (JSON) | CRUD actions, field mapping | Workflows, visual regression |
+
+## Test Spec format (MVP)
+
+```json
+{
+  "name": "家長管理 CRUD 測試",
+  "target": {
+    "url": "http://localhost:3001/t/ctb-premium-demo/ctb/parents",
+    "login_url": "http://localhost:3001/login",
+    "auth": { "username": "admin", "password": "admin" }
+  },
+  "table": "plugin_ctb_parents",
+  "actions": ["add_cancel", "add_save", "edit_cancel", "delete"],
+  "fields": [
+    { "name": "name", "label": "家長姓名", "selector": "input[name='name']",
+      "value": "測試家長", "required": true },
+    { "name": "phone", "label": "電話", "selector": "input[name='phone']",
+      "value": "0912345678" }
+  ],
+  "ui": {
+    "add_button": "新增家長",
+    "modal_title_regex": "新增家長",
+    "save_button": "儲存",
+    "cancel_button": "取消"
+  }
+}
+```
+
+## Configuration
+
+See `config.example.yaml` for all options.
+
+## License
+
+MIT

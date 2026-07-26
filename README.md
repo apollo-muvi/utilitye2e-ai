@@ -1,120 +1,123 @@
-# utilitye2e-ai v2
+# utilitye2e-ai
 
-**AI-powered Page Inspector & Action Executor**
-
-Crawls a web page with Playwright, extracts every interactive element with **computed reliable locators**, lets AI pick elements by ID to produce an action plan, then executes that plan against the real page.
-
----
-
-## v1 → v2 核心改進
-
-| v1 (舊) | v2 (新版) |
-|---------|----------|
-| 爬蟲提取扁平的 element list | 爬蟲計算每個元素的**多重 locator 策略** |
-| LLM 憑空猜 CSS selector | LLM 從 element map **按 ID 選元素** |
-| 需要 DB schema | 純頁面分析，**不需要 DB** |
-| Selector 不準確，常失敗 | 每個元素有 3~6 種 fallback 定位方式 |
-
----
+Open-source E2E test generator — AI discovers page elements, generates test steps, and runs them via Playwright with DOM snapshot diffing.
 
 ## How it works
 
 ```
-目標網址
-   ↓ (Playwright headless crawl)
-Page Inspector → 完整 interact element map（附locator）
-   ↓
-PageAnalyzer → 濃縮為 LLM 友好的格式
-   ↓ (LLM 按 ID 選元素)
-Action Plan (JSON)
-   ↓ (Playwright 執行)
-Executor → 實際操作頁面（click / fill / select）
+1. User enters Target URL + login credentials (in Web UI)
+        ↓
+2. 🔍 Discover — crawls DOM, clicks buttons, fills forms to reveal ALL testable elements
+        ↓
+3. User selects elements (checkbox) → AI generates test steps
+        ↓
+4. Review/edit steps → Run → DOM diff report
 ```
+
+The runner uses **DOM snapshot diffing**: snapshot before click → click → snapshot after → compare. No need to classify button behavior (modal? form? alert?) — if DOM changed, the button works.
+
+### Key design principles
+
+- **DOM diff, not classification** — click → compare DOM before/after. Generic, works on any UI.
+- **Generic deep scan** — discover crawls every button, clicks it, fills any revealed form, submits, and collects new buttons. No hardcoded keywords.
+- **Config-free targets** — all connection info (target URL, login, credentials) entered in the Web UI, not config files.
 
 ## Quick start
 
 ```bash
-# 安裝
-python3 -m venv venv
-source venv/bin/activate
-pip install playwright requests pyyaml flask flask-cors python-dotenv
-playwright install chromium
+# Install
+pip install -e .
 
-# 配置
+# Configure LLM provider
 cp config.example.yaml config.yaml
-# 編輯 config.yaml — 設定 LLM adapter
+# Edit config.yaml — set LLM provider (schema + llm only, no target needed)
 
-# 1. 檢查頁面結構
-python cli.py inspect --url https://example.com/login \
-  --login-url https://example.com/login \
-  -u username -p password
-
-# 2. AI 分析 + 執行動作（一鍵 pipeline）
-python cli.py auto --url https://example.com/students \
-  --login-url https://example.com/login \
-  -u username -p password \
-  --goal "新增一個學生，姓名測試，電話0912345678，然後儲存"
+# Run Web UI
+utilitye2e-ai web
+# → http://localhost:5001
 ```
 
-## CLI Commands
+## Web UI flow
 
-| 指令 | 用途 |
-|:-----|:------|
-| `inspect` | 爬取頁面，顯示完整 element map（含 locator 策略） |
-| `analyze` | 爬取 + AI 分析，產出 action plan（不執行） |
-| `run` | 執行已儲存的 action plan |
-| `auto` | 全自動 pipeline：爬取 → AI 分析 → 執行 |
-| `web` | Web UI（Flask） |
+1. **Target URL** — enter the page you want to test
+2. **Login settings** (collapsible) — login URL, username, password
+3. **🔍 探索元件** — crawls the page, reveals all buttons (including row-level actions via deep scan)
+4. **Select elements** — check the boxes for elements you want tested
+5. **🤖 AI 分析** — generates test steps for selected elements
+   - Optional: check 「分析後自動執行」 to auto-run tests after analysis
+6. **Review/edit steps** — fine-tune button names, fill values
+7. **▶ 執行測試** — runs Playwright, reports DOM diff per step
 
 ## Architecture
 
 ```
-ai/
-├── page_inspector.py   ← 核心：Playwright 爬蟲 + 自動計算 locator
-├── analyzer.py         ← PageAnalyzer：濃縮 + 產生 AI action plan
-└── prompts.py          ← LLM 提示詞
-
 core/
-├── executor.py         ← action plan 執行器（Playwright）
-└── recorder.py         ← 結果記錄
+├── spec.py        # TestSpec, TestStep (button + desc + fill_fields)
+└── runner.py      # DOM snapshot diff engine (click → snapshot → compare → reload)
 
-adapters/
-└── llm/                ← LLM adapter（Hermes / OpenRouter / OpenAI / Ollama）
+ai/
+├── analyzer.py    # AI generates steps from DOM + selected elements
+├── prompts.py     # System/user prompts for LLM
+└── page_crawler.py # Deep scan: click → fill form → submit → collect new buttons
 
-cli.py                  ← CLI 進入點
-config.py               ← 配置載入（.env + config.yaml）
+web/
+├── app.py              # Flask API: /api/ai/discover, /analyze, /run
+├── templates/index.html # SPA: discover → select → analyze → run
+├── static/js/app.js     # Step-based UI, spinner, auto-run
+└── static/css/app.css   # Styling
+
+config.yaml        # LLM + schema adapter config (no target info)
+cli.py             # CLI entry point
 ```
 
-## 支援的頁面類型
+### Three pluggable layers
 
-- **多步驟登入**：租戶輸入頁 → 登入頁（如 ClassTutorBot）
-- **單步驟登入**：帳號/密碼直接登入
-- **公開頁面**：不需要登入
+| Layer | Responsibility | Built-in | Extensible to |
+|-------|---------------|----------|--------------|
+| **SchemaAdapter** | Read table/column info | Manual JSON | PostgreSQL, SQLite, MySQL |
+| **LLMAdapter** | Analyze DOM → TestSpec | GLM (z.ai), OpenAI, Ollama | Any provider |
+| **Runner** | Execute test via DOM diff | Playwright | Other engines |
 
-## 元素定位策略
+## Test Step format
 
-每個互動元素會自動計算多種 locator（依可靠性排序）：
+```json
+{
+  "name": "家長管理測試",
+  "target": {
+    "url": "https://example.com/parents",
+    "login_url": "https://example.com/login",
+    "username": "admin",
+    "password": "admin"
+  },
+  "steps": [
+    { "button": "新增家長", "desc": "開啟新增表單", "fill_fields": [] },
+    { "button": "儲存", "desc": "儲存家長資料", "fill_fields": ["姓名", "電話"] },
+    { "button": "綁定學生", "desc": "測試綁定學生功能", "fill_fields": [] },
+    { "button": "產生 QR Code", "desc": "產生家長 QR Code", "fill_fields": [] },
+    { "button": "刪除", "desc": "刪除家長", "fill_fields": [] }
+  ]
+}
+```
 
-1. **data-testid** — 最可靠（如頁面有）
-2. **id selector** — 次可靠（如元素有 id）
-3. **get_by_role + name** — 語意定位
-4. **get_by_label** — 表單欄位
-5. **CSS attribute** — name / placeholder
-6. **get_by_text** — 按鈕/連結文字
+## Configuration
 
-執行器會逐一嘗試，直到其中一個成功。
+```yaml
+# config.yaml — only LLM and schema, no target info
+schema:
+  adapter: manual
+  path: mock_schema.json
 
-## LLM Adapters
+llm:
+  adapter: openrouter
 
-| Adapter | 說明 |
-|:--------|:------|
-| `hermes` | 本地 Hermes API（localhost:8642） |
-| `openrouter` | OpenRouter（需 API key） |
-| `openai` | OpenAI（需 API key） |
-| `ollama` | 本地 LLM（需 Ollama 服務） |
+web:
+  host: 0.0.0.0
+  port: 5001
+  debug: true
+```
 
-## Notes
+All target connection info (URL, login, credentials) is entered in the Web UI at runtime.
 
-- 需要 Python ≥ 3.9
-- Playwright 需要下載 Chromium browser（`playwright install chromium`）
-- v2 不需要 DB Schema adapter — 移除 v1 的 DB 依賴
+## License
+
+MIT

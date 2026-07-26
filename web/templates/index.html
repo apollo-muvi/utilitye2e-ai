@@ -9,22 +9,39 @@
 </head>
 <body>
 <div id="app">
-    <header><h1>🤖 utilitye2e-ai</h1></header>
+    <header>
+        <h1>🤖 utilitye2e-ai</h1>
+        <button id="btn-logout" class="btn-logout" title="關閉伺服器">⏻ 登出</button>
+    </header>
 
     <main>
         <!-- Step 1: Describe -->
         <section id="step-describe" class="card">
-            <!-- Parallel options -->
-            <div class="parallel-row">
-                <div class="parallel-node">
-                    <label>DB Table</label>
-                    <select id="sel-table" class="flow-input"><option value="">載入中...</option></select>
+            <!-- Target URL -->
+            <div class="flow-question">
+                <label>Target URL</label>
+                <input id="txt-url" class="flow-input" placeholder="https://tutor.classtutorbot.com/t/ctb-premium-demo/ctb/parents">
+            </div>
+
+            <!-- Auth (collapsible) -->
+            <details class="auth-details">
+                <summary>登入設定</summary>
+                <div class="auth-grid">
+                    <div><label>Login URL</label><input id="txt-login-url" placeholder="https://tutor.classtutorbot.com/t/ctb-premium-demo/login"></div>
+                    <div><label>Username</label><input id="txt-username" placeholder="admin"></div>
+                    <div><label>Password</label><input id="txt-password" type="password" placeholder="••••"></div>
                 </div>
-                <div class="parallel-or">OR</div>
-                <div class="parallel-node">
-                    <label>URL Path</label>
-                    <input id="txt-url" class="flow-input" placeholder="/page/settings 或 http://localhost:3002/page/settings">
+            </details>
+
+            <div class="flow-merge">↓</div>
+
+            <!-- Discover -->
+            <div class="flow-question">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+                    <button id="btn-discover" class="btn-secondary">🔍 探索元件</button>
+                    <span id="discover-status" style="font-size:.8rem;color:#64748b"></span>
                 </div>
+                <div id="discover-results" class="discover-list hidden"></div>
             </div>
 
             <div class="flow-merge">↓</div>
@@ -39,28 +56,22 @@
 
             <div class="flow-action-row">
                 <button id="btn-analyze" class="btn-primary btn-large">🤖 AI 分析</button>
+                <label class="auto-run-label"><input type="checkbox" id="chk-autorun"> 分析後自動執行</label>
             </div>
             <div id="analyze-error" class="error-msg hidden"></div>
         </section>
 
-        <!-- Step 2: Review/Edit Spec -->
+        <!-- Step 2: Review/Edit Steps -->
         <section id="step-spec" class="card hidden">
-            <h2>Step 2 — 檢視/微調 Test Spec</h2>
+            <h2>Step 2 — 檢視/微調測試步驟</h2>
             <div class="row">
-                <div class="col"><label>Test Name</label><input id="sp-name"></div>
-                <div class="col" style="flex:2"><label>Target URL</label><input id="sp-url"></div>
-                <div class="col"><label>Table</label><input id="sp-table"></div>
+                <div class="col" style="flex:2"><label>Test Name</label><input id="sp-name"></div>
+                <div class="col" style="flex:3"><label>Target URL</label><input id="sp-url"></div>
             </div>
-            <h3>Fields</h3>
-            <table id="spec-fields">
-                <thead><tr><th>欄位</th><th>Label</th><th>Selector</th><th>測試值</th><th>Type</th><th>Required</th></tr></thead>
-                <tbody></tbody>
-            </table>
-            <h3>UI Elements</h3>
-            <div id="spec-ui" class="ui-grid"></div>
-            <h3>Actions</h3>
-            <div id="spec-actions" class="action-grid"></div>
-            <div class="row" style="margin-top:12px">
+            <h3>測試步驟</h3>
+            <div id="steps-container"></div>
+            <div class="row" style="margin-top:12px;gap:8px">
+                <button id="btn-add-step" class="btn-secondary">+ 新增步驟</button>
                 <button id="btn-run" class="btn-primary">▶ 執行測試</button>
                 <button id="btn-save" class="btn-secondary">💾 存檔</button>
             </div>

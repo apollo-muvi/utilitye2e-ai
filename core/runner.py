@@ -1,287 +1,199 @@
 """
 Runner — executes a TestSpec with Playwright.
 
-Simplified MVP: handles login, CRUD actions (add_cancel, add_save, edit_cancel, delete, page_load).
+DOM snapshot diff: click button → compare DOM before/after → report change.
 """
 
 import os
 import re
 import asyncio
-from typing import Optional
+import hashlib
 
-from playwright.async_api import async_playwright, Page, expect
+from playwright.async_api import async_playwright, Page
 
-from core.spec import TestSpec
+from core.spec import TestSpec, TestStep
 from core.recorder import Recorder
+
+_BROWSER_PATH = os.environ.get("PLAYWRIGHT_BROWSERS_PATH",
+    os.path.expanduser("~/.cache/ms-playwright/chromium_headless_shell-1228/chrome-linux/headless_shell"))
 
 
 class Runner:
-    def __init__(self, spec: TestSpec, headless: bool = True, screenshot_dir: str = "screenshots"):
+    def __init__(self, spec: TestSpec, headless=True, screenshot_dir="screenshots"):
         self.spec = spec
         self.headless = headless
         self.recorder = Recorder()
-        self.screenshot_dir = screenshot_dir
         os.makedirs(screenshot_dir, exist_ok=True)
 
     async def run(self) -> dict:
-        """Execute the test spec, return results summary."""
-        print(f"  → Starting Playwright browser...")
+        print("  → Starting browser...")
         async with async_playwright() as p:
             browser = await p.chromium.launch(
                 headless=self.headless,
-                args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
-            )
-            context = await browser.new_context(
-                viewport={"width": 1920, "height": 1080},
-                locale="zh-TW",
-            )
-            page = await context.new_page()
-            page.set_default_timeout(30000)
-
-            # Anti-detection
-            await page.add_init_script("""
-                Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-            """)
+                args=["--no-sandbox", "--disable-blink-features=AutomationControlled"],
+                executable_path=_BROWSER_PATH)
+            ctx = await browser.new_context(viewport={"width": 1920, "height": 1080}, locale="zh-TW")
+            page = await ctx.new_page()
+            page.set_default_timeout(15000)
+            page.on("dialog", lambda d: asyncio.ensure_future(d.accept()))
 
             try:
-                # Login if needed
-                print(f"  → Checking login requirements...")
-                await self._do_login(page)
-                # Navigate to target
-                print(f"  → Navigating to {self.spec.target.url}...")
+                await self._login(page)
+                print(f"  → Navigate: {self.spec.target.url}")
                 await page.goto(self.spec.target.url, wait_until="networkidle")
-                print(f"  → Page loaded, waiting for JS rendering (5s)...")
-                await page.wait_for_timeout(5000)  # Increased from 2s to 5s
+                await page.wait_for_timeout(3000)
 
-                # Execute actions
-                print(f"  → Executing {len(self.spec.actions)} actions: {self.spec.actions}")
-                for i, action in enumerate(self.spec.actions):
-                    print(f"  → [{i+1}/{len(self.spec.actions)}] Running action: {action}")
-                    await self._execute_action(page, action)
+                for i, step in enumerate(self.spec.steps):
+                    label = f"{self.spec.name} #{i+1} {step.desc or step.button}"
+                    await self._run_step(page, step, label)
 
-                print(f"  → All actions completed")
-
+                print("  → Done")
             except Exception as exc:
-                print(f"  ✗ Exception during test execution: {exc}")
-                import traceback
-                traceback.print_exc()
-                self.recorder.fail("setup", f"Setup failed: {exc}")
+                print(f"  ✗ Fatal: {exc}")
+                self.recorder.fail("setup", str(exc))
             finally:
-                print(f"  → Closing browser...")
                 await browser.close()
 
         return self.recorder.summary()
 
-    async def _do_login(self, page: Page):
-        """Login if credentials are provided."""
+    async def _login(self, page: Page):
         t = self.spec.target
         if not t.login_url or not t.username:
             return
-        # Convert relative login_url to absolute
-        login_url = t.login_url if t.login_url.startswith('http') else f"{t.url.rstrip('/')}/{t.login_url.lstrip('/')}"
-        
-        print(f"  → Going to login page: {login_url}")
-        await page.goto(login_url, wait_until="networkidle")
-        print(f"  → Login page loaded, waiting for inputs to appear...")
-        await page.wait_for_timeout(2000)  # Wait for inputs to render
-        
-        # Wait for inputs to be visible
+        url = t.login_url if t.login_url.startswith("http") else f"{t.url.rstrip('/')}/{t.login_url.lstrip('/')}"
+        print(f"  → Login: {url}")
+        await page.goto(url, wait_until="networkidle")
+        await page.wait_for_timeout(2000)
+        await page.fill('input[type="text"]', t.username)
+        await page.fill('input[type="password"]', t.password)
+        await page.click('button:has-text("登入")')
+        await page.wait_for_timeout(3000)
+
+    # ─── DOM snapshot ───
+    async def _snapshot(self, page: Page) -> str:
+        """Hash of page DOM structure — element count + visible text."""
+        return await page.evaluate("""
+            () => {
+                const els = document.querySelectorAll('*');
+                let count = els.length;
+                let texts = [];
+                for (const el of els) {
+                    const r = el.getBoundingClientRect();
+                    if (r.width > 0 && r.height > 0 && el.tagName === 'BUTTON') {
+                        texts.push(el.innerText.trim());
+                    }
+                }
+                const inputs = document.querySelectorAll('input, textarea, select').length;
+                return JSON.stringify({count, inputs, btns: texts.sort().join('|')});
+            }
+        """)
+
+    # ─── Run one step ───
+    async def _run_step(self, page: Page, step: TestStep, label: str):
         try:
-            print(f"  → Waiting for username input...")
-            await page.wait_for_selector('input[name="username"], input[type="text"]', timeout=10000)
-            print(f"  → Filling username...")
-            await page.fill('input[name="username"], input[type="text"]', t.username)
-            
-            print(f"  → Waiting for password input...")
-            await page.wait_for_selector('input[name="password"], input[type="password"]', timeout=10000)
-            print(f"  → Filling password...")
-            await page.fill('input[name="password"], input[type="password"]', t.password)
-        except Exception as e:
-            print(f"  ✗ Input field error: {e}")
-            raise
-        
-        # Try multiple login button patterns
-        print(f"  → Looking for login button...")
-        try:
-            await page.get_by_text("登入", exact=False).first.click(timeout=5000)
-        except:
+            # 1. Snapshot before
+            before = await self._snapshot(page)
+            url_before = page.url
+
+            # 2. Find button
+            btn = await self._find_button(page, step.button)
+            if not btn:
+                self.recorder.fail(label, f"找不到按鈕: {step.button}")
+                return
+
+            # 3. Click
             try:
-                await page.get_by_role("button", name="登入").first.click(timeout=5000)
+                await btn.click(timeout=5000)
+            except Exception:
+                await btn.click(force=True, timeout=5000)
+            print(f"    → Clicked: {step.button}")
+            await page.wait_for_timeout(2000)
+
+            # 4. Fill fields if any
+            if step.fill_fields:
+                await self._fill_fields(page, step.fill_fields)
+                await page.wait_for_timeout(500)
+
+            # 5. Snapshot after
+            after = await self._snapshot(page)
+            url_after = page.url
+
+            # 6. Diff
+            if before != after:
+                # Describe what changed
+                import json
+                b, a = json.loads(before), json.loads(after)
+                d_el = a["count"] - b["count"]
+                d_in = a["inputs"] - b["inputs"]
+                parts = []
+                if d_el: parts.append(f"DOM {b['count']}→{a['count']} ({'+' if d_el>0 else ''}{d_el})")
+                if d_in: parts.append(f"inputs {b['inputs']}→{a['inputs']}")
+                if url_before != url_after: parts.append(f"URL→{url_after}")
+                if not parts: parts.append("按鈕文字變化")
+                self.recorder.pass_(label, f"✓ {', '.join(parts)}")
+            else:
+                self.recorder.fail(label, "DOM 無變化，按鈕可能無效")
+
+            # 7. Reload to reset state for next step
+            try:
+                await page.reload(wait_until="networkidle")
+                await page.wait_for_timeout(2000)
             except:
-                # Fallback to any button with "登入" text
-                all_buttons = await page.query_selector_all('button')
-                for btn in all_buttons:
-                    text = await btn.inner_text()
-                    if "登入" in text:
-                        print(f"  → Clicking login button with text: '{text}'")
-                        await btn.click()
-                        break
-        print(f"  → Login completed, waiting 3s for session...")
-        await page.wait_for_timeout(3000)  # Wait for login session to establish
+                pass
 
-    async def _execute_action(self, page: Page, action: str):
-        ui = self.spec.ui
-        name_prefix = f"{self.spec.name}:{action}"
-
-        if action == "page_load":
-            await self._test_page_load(page, name_prefix)
-
-        elif action == "add_cancel":
-            await self._test_add_cancel(page, name_prefix)
-
-        elif action == "add_save":
-            await self._test_add_save(page, name_prefix)
-
-        elif action == "edit_cancel":
-            await self._test_edit_cancel(page, name_prefix)
-
-        elif action == "delete":
-            await self._test_delete(page, name_prefix)
-
-    async def _test_page_load(self, page: Page, name: str):
-        try:
-            title = await page.locator("h1, h2").first.inner_text()
-            self.recorder.pass_(name, f"頁面載入成功，標題: {title}")
         except Exception as exc:
-            self.recorder.fail(name, f"頁面載入失敗: {exc}")
+            print(f"    ✗ {exc}")
+            self.recorder.fail(label, str(exc))
+            try:
+                await page.reload(wait_until="networkidle")
+                await page.wait_for_timeout(2000)
+            except:
+                pass
 
-    async def _fill_fields(self, page: Page):
-        for f in self.spec.fields:
+    # ─── Find button ───
+    async def _find_button(self, page: Page, text: str):
+        if not text:
+            return None
+        # 1. exact role match
+        loc = page.get_by_role("button", name=text, exact=True)
+        if await loc.count() > 0 and await loc.first.is_visible():
+            return loc.first
+        # 2. fuzzy role match
+        loc = page.get_by_role("button", name=text, exact=False)
+        if await loc.count() > 0 and await loc.first.is_visible():
+            return loc.first
+        # 3. partial text on all buttons
+        for btn in await page.query_selector_all("button"):
+            bt = (await btn.inner_text()).strip()
+            if text in bt and await btn.is_visible():
+                return btn
+        # 4. keyword
+        cn = re.findall(r'[\u4e00-\u9fff]+', text)
+        for btn in await page.query_selector_all("button"):
+            bt = (await btn.inner_text()).strip()
+            if any(k in bt for k in cn) and await btn.is_visible():
+                return btn
+        # 5. links
+        for a in await page.query_selector_all("a"):
+            at = (await a.inner_text()).strip()
+            if text in at and await a.is_visible():
+                return a
+        return None
+
+    # ─── Fill fields ───
+    async def _fill_fields(self, page: Page, fields: list):
+        for f in fields:
             if not f.selector or not f.value:
                 continue
             try:
-                if f.field_type == "select" and f.options:
-                    await page.select_option(f.selector, label=f.options[0])
-                elif f.field_type == "checkbox":
-                    await page.check(f.selector)
-                else:
-                    await page.fill(f.selector, f.value)
-            except Exception:
-                pass  # field may not exist in this context
-
-    async def _get_button(self, page: Page, name: str):
-        """Find button with intelligent fallback strategies."""
-        if not name:
-            # Fallback: find any button with common add/save/cancel text
-            all_buttons = await page.query_selector_all('button')
-            for btn in all_buttons:
-                text = await btn.inner_text().strip()
-                if text in ["新增", "新增", "Add", "Save", "儲存", "取消", "Cancel"]:
-                    return btn
-            return all_buttons[0] if all_buttons else None
-
-        # Strategy 1: Extract core keyword from button name (remove symbols)
-        # "+新增選手" → "新增", "Save Changes" → "Save"
-        keywords = [name]
-        if "+" in name:
-            keywords.append(name.replace("+", "").strip())
-        # Extract Chinese characters (each as potential keyword)
-        import re
-        cn_chars = re.findall(r'[\u4e00-\u9fff]', name)
-        if cn_chars:
-            # Try both single char and combinations
-            for i in range(len(cn_chars)):
-                keywords.append(cn_chars[i])
-                if i < len(cn_chars) - 1:
-                    keywords.append(cn_chars[i] + cn_chars[i+1])
-        # Extract English words
-        en_words = re.findall(r'[A-Za-z]+', name)
-        for word in en_words:
-            keywords.append(word)
-
-        # Strategy 2: Try exact match for each keyword
-        for kw in keywords:
-            btn = page.get_by_role("button", name=kw, exact=True)
-            if await btn.count() > 0:
-                return btn.first
-
-        # Strategy 3: Partial text match for each keyword
-        all_buttons = await page.query_selector_all('button')
-        for kw in keywords:
-            for btn in all_buttons:
-                text = await btn.inner_text()
-                if kw and kw in text:
-                    return btn
-
-        # Strategy 4: Match by common patterns (icon + text)
-        for btn in all_buttons:
-            text = await btn.inner_text()
-            # Check if button contains any of our keywords
-            if any(kw in text for kw in keywords if kw):
-                return btn
-
-        return None
-
-    async def _test_add_cancel(self, page: Page, name: str):
-        try:
-            start_mut = len(self.recorder.mutations)
-            btn = await self._get_button(page, self.spec.ui.add_button)
-            if not btn:
-                raise Exception(f"找不到按鈕: {self.spec.ui.add_button}")
-            await btn.click()
-            await page.wait_for_timeout(1000)
-            # Click cancel
-            cancel_btn = await self._get_button(page, self.spec.ui.cancel_button)
-            if not cancel_btn:
-                raise Exception(f"找不到按鈕: {self.spec.ui.cancel_button}")
-            await cancel_btn.click()
-            await page.wait_for_timeout(500)
-            if len(self.recorder.mutations) == start_mut:
-                self.recorder.pass_(name, f"{self.spec.ui.add_button} 開啟後取消，無 mutation")
-            else:
-                self.recorder.fail(name, "取消觸發了 mutation")
-        except Exception as exc:
-            self.recorder.fail(name, str(exc))
-
-    async def _test_add_save(self, page: Page, name: str):
-        try:
-            print(f"    → Clicking add button: {self.spec.ui.add_button}")
-            btn = await self._get_button(page, self.spec.ui.add_button)
-            if not btn:
-                raise Exception(f"找不到按鈕: {self.spec.ui.add_button}")
-            await btn.click()
-            print(f"    → Add button clicked, waiting 1s...")
-            await page.wait_for_timeout(1000)
-            print(f"    → Filling fields...")
-            await self._fill_fields(page)
-            print(f"    → Looking for save button: {self.spec.ui.save_button}")
-            save_btn = await self._get_button(page, self.spec.ui.save_button)
-            if not save_btn:
-                raise Exception(f"找不到按鈕: {self.spec.ui.save_button}")
-            print(f"    → Clicking save button...")
-            await save_btn.click()
-            print(f"    → Waiting 2s for save to complete...")
-            await page.wait_for_timeout(2000)
-            self.recorder.pass_(name, "新增儲存完成")
-        except Exception as exc:
-            print(f"    ✗ add_save failed: {exc}")
-            self.recorder.fail(name, str(exc))
-
-    async def _test_edit_cancel(self, page: Page, name: str):
-        try:
-            btn = await self._get_button(page, self.spec.ui.edit_button)
-            if not btn:
-                raise Exception(f"找不到按鈕: {self.spec.ui.edit_button}")
-            await btn.click()
-            await page.wait_for_timeout(1000)
-            cancel_btn = await self._get_button(page, self.spec.ui.cancel_button)
-            if not cancel_btn:
-                raise Exception(f"找不到按鈕: {self.spec.ui.cancel_button}")
-            await cancel_btn.click()
-            await page.wait_for_timeout(500)
-            self.recorder.pass_(name, "編輯取消成功")
-        except Exception as exc:
-            self.recorder.fail(name, str(exc))
-
-    async def _test_delete(self, page: Page, name: str):
-        try:
-            btn = await self._get_button(page, self.spec.ui.delete_button)
-            if not btn:
-                raise Exception(f"找不到按鈕: {self.spec.ui.delete_button}")
-            await btn.click()
-            await page.wait_for_timeout(500)
-            # Confirm if dialog appears
-            page.on("dialog", lambda d: asyncio.ensure_future(d.accept()))
-            self.recorder.pass_(name, "刪除按鈕點擊成功")
-        except Exception as exc:
-            self.recorder.fail(name, str(exc))
+                el = page.locator(f.selector)
+                if await el.count() > 0 and await el.first.is_visible():
+                    if f.field_type == "select" and f.options:
+                        await el.first.select_option(label=f.options[0])
+                    elif f.field_type == "checkbox":
+                        await el.first.check()
+                    else:
+                        await el.first.fill(f.value)
+                    print(f"    → Fill: {f.selector} = {f.value}")
+            except:
+                pass

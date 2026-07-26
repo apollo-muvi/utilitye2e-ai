@@ -3,9 +3,12 @@ Flask Web App — SPA for AI Dialog + Spec editing + Test execution.
 """
 
 import os
+import io
+import sys
 import asyncio
 import json
 import tempfile
+from contextlib import contextmanager
 
 from flask import Flask, render_template, jsonify, request
 from flask_cors import CORS
@@ -31,6 +34,21 @@ def create_app(config: dict = None) -> Flask:
     # Store config on app for access in routes
     app.config["APP_CONFIG"] = config
 
+    @contextmanager
+    def _capture_log():
+        """Capture stdout/stderr into a list of log lines."""
+        buf = io.StringIO()
+        old_out, old_err = sys.stdout, sys.stderr
+        sys.stdout = sys.stderr = buf
+        try:
+            yield buf
+        finally:
+            sys.stdout, sys.stderr = old_out, old_err
+
+    def _extract_log(buf):
+        lines = buf.getvalue().strip().split("\n") if buf.getvalue().strip() else []
+        return [l for l in lines if l.strip()]
+
     @app.route("/")
     def index():
         return render_template("index.html")
@@ -43,86 +61,122 @@ def create_app(config: dict = None) -> Flask:
             "llm_adapter": llm_cfg.get("adapter", "openrouter"),
             "llm_model": llm_cfg.get("model", ""),
             "schema_adapter": schema_cfg.get("adapter", "postgres"),
-            "base_url": config.get("target", {}).get("base_url", ""),
         })
 
-    @app.route("/api/tables")
-    def list_tables():
-        try:
-            schema = create_schema_adapter(config["schema"])
-            tables = schema.get_tables()
-            return jsonify({"tables": tables})
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
+    @app.route("/api/shutdown", methods=["POST"])
+    def shutdown():
+        import signal, os
+        os.kill(os.getpid(), signal.SIGINT)
+        return jsonify({"ok": True})
 
-    @app.route("/api/tables/<table>/columns")
-    def table_columns(table):
-        try:
-            schema = create_schema_adapter(config["schema"])
-            cols = schema.get_columns(table)
-            return jsonify({"columns": [c.to_dict() for c in cols]})
-        except Exception as e:
-            return jsonify({"error": str(e)}), 500
+    def _derive_login_url(target_url, login_url=""):
+        """Use explicit login_url, or derive from target URL's tenant."""
+        if login_url:
+            return login_url
+        from urllib.parse import urlparse
+        parsed = urlparse(target_url)
+        parts = parsed.path.split("/")
+        if "t" in parts:
+            idx = parts.index("t")
+            if idx + 1 < len(parts):
+                return f"{parsed.scheme}://{parsed.netloc}/t/{parts[idx+1]}/login"
+        return ""
+
+    @app.route("/api/ai/discover", methods=["POST"])
+    def ai_discover():
+        """Pure DOM crawl — no LLM. Returns testable elements list."""
+        data = request.json
+        with _capture_log() as log_buf:
+            try:
+                target_url = data.get("target_url", "")
+                login_url = _derive_login_url(target_url, data.get("login_url", ""))
+                username = data.get("username", "")
+                password = data.get("password", "")
+
+                print(f"=== DISCOVER === {target_url}")
+                from ai.page_crawler import crawl_page
+                dom = crawl_page(url=target_url, login_url=login_url, username=username, password=password)
+
+                # Build selectable element list
+                elements = []
+                seen_labels = set()
+                skip_labels = {"☰", "登出", "Logout", "Sign out", "取消", "儲存", "Cancel", "Save"}
+                for btn in dom.get("buttons", []):
+                    t = btn["text"].strip()
+                    if t and len(t) < 40 and t not in skip_labels and t not in seen_labels:
+                        elements.append({"type": "button", "label": t, "text": t})
+                        seen_labels.add(t)
+                for inp in dom.get("inputs", []):
+                    label = inp.get("label") or inp.get("placeholder") or inp.get("name") or ""
+                    if label:
+                        elements.append({"type": "input", "label": label, "text": f"{inp.get('tag','input')}: {label}"})
+                for th in dom.get("tables", []):
+                    elements.append({"type": "column", "label": th, "text": f"column: {th}"})
+
+                title = dom.get("title", "")
+                print(f"✓ Found {len(elements)} elements (title={title})")
+                return jsonify({"elements": elements, "title": title, "logs": _extract_log(log_buf)})
+            except Exception as e:
+                import traceback; traceback.print_exc()
+                return jsonify({"error": str(e), "logs": _extract_log(log_buf)}), 500
 
     @app.route("/api/ai/analyze", methods=["POST"])
     def ai_analyze():
         data = request.json
-        print(f"\n=== AI ANALYZE DEBUG ===")
-        print(f"Input: description='{data.get('description', '')[:100]}...', table='{data.get('table', '')}', url_path='{data.get('url_path', '')}'")
-        try:
-            print(f"→ Creating schema adapter...")
-            schema = create_schema_adapter(config["schema"])
-            print(f"→ Creating LLM adapter...")
-            llm = create_llm_adapter(config["llm"])
-            print(f"→ Creating analyzer...")
-            analyzer = Analyzer(llm, schema)
-            print(f"→ Calling analyzer.generate()...")
-            spec = analyzer.generate(
-                description=data["description"],
-                table=data.get("table", ""),
-                base_url=config["target"]["base_url"],
-                login_url=config["target"].get("login_url", ""),
-                username=config["target"].get("username", ""),
-                password=config["target"].get("password", ""),
-                url_path=data.get("url_path", ""),
-            )
-            print(f"✓ Analysis complete: {spec.name} with {len(spec.fields)} fields")
-            print(f"=== END DEBUG ===\n")
-            return jsonify({"spec": spec.to_dict(), "spec_json": spec.to_json()})
-        except Exception as e:
-            print(f"✗ ERROR: {e}")
-            print(f"=== END DEBUG (FAILED) ===\n")
-            import traceback
-            traceback.print_exc()
-            return jsonify({"error": str(e)}), 500
+        with _capture_log() as log_buf:
+            try:
+                print(f"=== AI ANALYZE ===")
+                print(f"Input: description='{data.get('description', '')[:100]}'")
+                print(f"→ Creating adapters...")
+                schema = create_schema_adapter(config["schema"])
+                llm = create_llm_adapter(config["llm"])
+                analyzer = Analyzer(llm, schema)
+                target_url = data.get("target_url", "")
+                login_url = _derive_login_url(target_url, data.get("login_url", ""))
+                spec = analyzer.generate(
+                    description=data["description"],
+                    target_url=target_url,
+                    login_url=login_url,
+                    username=data.get("username", ""),
+                    password=data.get("password", ""),
+                    selected_elements=data.get("selected_elements", []),
+                )
+                print(f"✓ Analysis complete: {spec.name} with {len(spec.fields)} fields")
+                return jsonify({"spec": spec.to_dict(), "spec_json": spec.to_json(), "logs": _extract_log(log_buf)})
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                return jsonify({"error": str(e), "logs": _extract_log(log_buf)}), 500
 
     @app.route("/api/ai/run", methods=["POST"])
     def ai_run():
         data = request.json
-        print(f"\n=== TEST RUN DEBUG ===")
-        print(f"Spec: {data.get('spec', {}).get('name', 'unknown')}")
-        print(f"Actions: {data.get('spec', {}).get('actions', [])}")
-        print(f"Target URL: {data.get('spec', {}).get('target', {}).get('url', '')}")
-        try:
-            spec = TestSpec.from_dict(data["spec"])
-            print(f"→ Creating runner (headless={not data.get('headed', False)})...")
-            runner = Runner(spec, headless=not data.get("headed", False))
-            print(f"→ Running tests...")
-            summary = asyncio.run(runner.run())
-            print(f"✓ Test run complete: passed={summary.get('passed', 0)}, failed={summary.get('failed', 0)}")
-            print(f"=== END DEBUG ===\n")
-            return jsonify({
-                "summary": summary,
-                "results": [
-                    {"name": r.name, "status": r.status, "detail": r.detail}
-                    for r in runner.recorder.results
-                ],
-            })
-        except Exception as e:
-            print(f"✗ ERROR: {e}")
-            print(f"=== END DEBUG (FAILED) ===\n")
-            import traceback
-            traceback.print_exc()
-            return jsonify({"error": str(e)}), 500
+        with _capture_log() as log_buf:
+            try:
+                spec = TestSpec.from_dict(data["spec"])
+                print(f"=== TEST RUN ===")
+                print(f"Spec: {spec.name}")
+                print(f"Steps: {len(spec.steps)}")
+                print(f"Target: {spec.target.url}")
+                runner = Runner(spec, headless=not data.get("headed", False))
+                summary = asyncio.run(runner.run())
+                print(f"✓ Done: passed={summary.get('passed', 0)}, failed={summary.get('failed', 0)}")
+                return jsonify({
+                    "summary": summary,
+                    "results": [
+                        {"name": r.name, "status": r.status, "detail": r.detail}
+                        for r in runner.recorder.results
+                    ],
+                    "logs": _extract_log(log_buf),
+                })
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                return jsonify({"error": str(e), "logs": _extract_log(log_buf)}), 500
 
     return app
+
+
+if __name__ == "__main__":
+    app = create_app()
+    app.run(host="0.0.0.0", port=5001, debug=False)
