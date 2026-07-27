@@ -48,7 +48,15 @@ def load_config(config_path: str = "config.yaml") -> Dict[str, Any]:
     config["web"].setdefault("port", int(os.getenv("FLASK_PORT", "5000")))
     config["web"].setdefault("debug", os.getenv("FLASK_DEBUG", "true").lower() == "true")
 
+    # Web config
+    # ...
     return config
+
+
+def load_locator_strategies():
+    """Load locator strategies YAML. Returns a LocatorResolver."""
+    from core.locator_resolver import LocatorResolver
+    return LocatorResolver.from_yaml()
 
 
 def _expand_env(obj):

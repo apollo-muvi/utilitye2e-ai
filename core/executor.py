@@ -22,21 +22,24 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
 from playwright.async_api import async_playwright, Page
+from core.locator_resolver import LocatorResolver
 
 
 class Executor:
     """Execute an action plan against a real page."""
 
     def __init__(self, element_map: Dict[str, Any], headless: bool = True,
-                 storage_state: Optional[Dict] = None):
+                 storage_state: Optional[Dict] = None, llm=None):
         self.element_map = element_map
         self.headless = headless
         self.storage_state = storage_state  # cookies/localStorage from inspector
+        self.llm = llm  # optional: for AI locator fallback
         self.results: List[Dict] = []
         self.plan: Optional[Dict] = None
         self.screenshot_dir = ""
         self._browser = None
         self._page = None
+        self._resolver = LocatorResolver.from_yaml()
 
     async def execute(self, plan: Dict[str, Any], output_dir: str = "output") -> Dict[str, Any]:
         """Execute a plan and return results.
@@ -123,7 +126,7 @@ class Executor:
             if action == "wait":
                 el = self._find_element(element_id, elements)
                 locators = el.get("locators", [])
-                await self._try_locators(locators, "wait_for")
+                await self._try_locators(locators, "wait_for", el_attrs=el)
                 return self._pass(name, f"Waited for element [{element_id}]")
 
             if action == "assert":
@@ -138,7 +141,7 @@ class Executor:
 
                 locators = el.get("locators", [])
                 try:
-                    await self._try_locators(locators, "wait_for")
+                    await self._try_locators(locators, "wait_for", el_attrs=el)
                     return self._pass(name, f"Element [{element_id}] exists")
                 except Exception:
                     return self._fail(name, f"Element [{element_id}] not found on page")
@@ -156,7 +159,7 @@ class Executor:
                     return self._fail(name, f"Element [{element_id}] not found in map")
 
                 locators = el.get("locators", [])
-                await self._try_locators(locators, "click")
+                await self._try_locators(locators, "click", el_attrs=el)
                 await self._page.wait_for_timeout(800)
                 return self._pass(name, f"Clicked [{el.get('text', '') or el.get('label', '') or element_id}]")
 
@@ -166,7 +169,7 @@ class Executor:
                     return self._fail(name, f"Element [{element_id}] not found in map")
 
                 locators = el.get("locators", [])
-                await self._try_locators(locators, "fill", value)
+                await self._try_locators(locators, "fill", value, el_attrs=el)
                 return self._pass(name, f"Filled [{el.get('label', '') or el.get('name', '')}] with '{value}'")
 
             if action == "select":
@@ -176,7 +179,7 @@ class Executor:
 
                 locators = el.get("locators", [])
                 # Try select via value first, then label
-                locator_obj = self._build_locator(locators[0]) if locators else None
+                locator_obj = self._resolver.build_locator(locators[0], self._page) if locators else None
                 if locator_obj:
                     try:
                         await locator_obj.select_option(value=value)
@@ -194,7 +197,7 @@ class Executor:
                     return self._fail(name, f"Element [{element_id}] not found in map")
 
                 locators = el.get("locators", [])
-                locator_obj = self._build_locator(locators[0]) if locators else None
+                locator_obj = self._resolver.build_locator(locators[0], self._page) if locators else None
                 if locator_obj:
                     await locator_obj.check()
                 return self._pass(name, f"Checked [{el.get('label', '')}]")
@@ -212,18 +215,18 @@ class Executor:
         return None
 
     async def _try_locators(self, locators: List[str], action: str, value: str = "",
-                           step_desc: str = "", element_keywords: str = ""):
+                           step_desc: str = "", element_keywords: str = "",
+                           el_attrs: Optional[Dict] = None):
         """Try each locator strategy in order until one succeeds.
-        
-        If all exact strategies fail, falls back to fuzzy matching:
-        - For get_by_text: tries substrings of the target text
-        - For get_by_role: tries role + partial name match
-        - If all fail, uses element map info for a best-effort analysis
+
+        Phase 1: config-driven locators (fast path)
+        Phase 2: AI fallback (only if all config locators fail + LLM available)
+        Then: fuzzy text matching as last resort
         """
         last_error = None
         for loc_str in locators:
             try:
-                locator_obj = self._build_locator(loc_str)
+                locator_obj = self._resolver.build_locator(loc_str, self._page)
                 if locator_obj is None:
                     continue
 
@@ -237,6 +240,21 @@ class Executor:
             except Exception as e:
                 last_error = e
                 continue
+
+        # ── Phase 2: AI fallback ───────────────────────────────
+        if el_attrs and self.llm:
+            try:
+                ai_loc = await self._resolver.resolve_via_ai(el_attrs, self._page, self.llm)
+                if ai_loc:
+                    if action == "click":
+                        await ai_loc.click()
+                    elif action == "fill":
+                        await ai_loc.fill(value)
+                    elif action == "wait_for":
+                        await ai_loc.wait_for(state="visible", timeout=5000)
+                    return  # AI saved us
+            except Exception as e:
+                last_error = e
 
         # ── Fuzzy fallback: exact locators failed, try smarter matching ──
         # For text-based actions, try contains-match with shorter substrings
@@ -310,46 +328,6 @@ class Executor:
             if w not in results and len(w) >= 2:
                 results.append(w)
         return results
-
-    def _build_locator(self, loc_str: str):
-        """Convert a locator string to a Playwright Locator object."""
-        page = self._page
-
-        # get_by_test_id:<value>
-        if loc_str.startswith("get_by_test_id:"):
-            val = loc_str.split(":", 1)[1]
-            return page.get_by_test_id(val)
-
-        # get_by_role:<role>:name=<name>
-        if loc_str.startswith("get_by_role:"):
-            parts = loc_str.split(":")
-            role = parts[1]
-            name = parts[2].replace("name=", "", 1) if len(parts) > 2 else ""
-            opts = {"name": name} if name else {}
-            return page.get_by_role(role, **opts)
-
-        # get_by_label:<label>
-        if loc_str.startswith("get_by_label:"):
-            val = loc_str.split(":", 1)[1]
-            return page.get_by_label(val)
-
-        # get_by_placeholder:<placeholder>
-        if loc_str.startswith("get_by_placeholder:"):
-            val = loc_str.split(":", 1)[1]
-            return page.get_by_placeholder(val)
-
-        # get_by_text:<text>
-        if loc_str.startswith("get_by_text:"):
-            val = loc_str.split(":", 1)[1]
-            return page.get_by_text(val, exact=False)
-
-        # get_by_title:<title>
-        if loc_str.startswith("get_by_title:"):
-            val = loc_str.split(":", 1)[1]
-            return page.get_by_title(val)
-
-        # CSS selector
-        return page.locator(loc_str)
 
     def _pass(self, name: str, detail: str) -> Dict:
         return {"step": name, "status": "pass", "detail": detail}

@@ -1,0 +1,114 @@
+# ============================================================
+# Locator Strategies — the SINGLE source of truth for selectors.
+# Add a new selector type = add a strategy block here. Zero code changes.
+# ============================================================
+# Each strategy defines:
+#   name         — identifier
+#   priority     — lower = tried first (1 > 10)
+#   attrs        — DOM attributes to check (first non-empty wins)
+#   prefix       — how executor resolves it to a Playwright API:
+#                   get_by_test_id, get_by_role, get_by_label,
+#                   get_by_placeholder, get_by_text, get_by_title,
+#                   css_id, css_attr
+#   value_from   — how the JS engine extracts the value:
+#                   attr_value, text_content, label_text_for_id
+#   value_template — (optional) printf-style template for CSS locators,
+#                   placeholders: {value}, {attr}, {tag}
+#   role_from    — (optional, for get_by_role) where to get the role
+#   condition    — (optional) JS expression that must be truthy
+# ============================================================
+
+version: 1
+
+strategies:
+  # --- Test attributes (highest priority) ---
+  - name: test_id
+    priority: 1
+    attrs: [data-testid, data-test-id]
+    prefix: get_by_test_id
+    value_from: attr_value
+
+  - name: data_cy
+    priority: 2
+    attrs: [data-cy, data-qa, data-test]
+    prefix: css_attr
+    value_template: '[{attr}="{value}"]'
+
+  # --- ID-based ---
+  - name: element_id
+    priority: 3
+    attrs: [id]
+    prefix: css_id
+    value_template: '#{value}'
+    condition: "value && value.length > 2"
+
+  - name: aria_label
+    priority: 4
+    attrs: [aria-label]
+    prefix: get_by_role
+    value_from: attr_value
+    role_from: "el.role || el.tagName.toLowerCase()"
+
+  # --- Label association ---
+  - name: label_for
+    priority: 5
+    attrs: [id]
+    prefix: get_by_label
+    value_from: label_text_for_id
+
+  # --- Name attribute (form fields) ---
+  - name: name_attr
+    priority: 6
+    attrs: [name]
+    prefix: css_attr
+    value_template: '{tag}[name="{value}"]'
+
+  # --- Placeholder ---
+  - name: placeholder
+    priority: 7
+    attrs: [placeholder]
+    prefix: get_by_placeholder
+    value_from: attr_value
+
+  # --- Button/link text ---
+  - name: button_text
+    priority: 8
+    prefix: get_by_text
+    value_from: text_content
+    condition: "(el.role === 'button' || el.tagName === 'BUTTON' || el.tagName === 'A') && value && value.length < 60"
+
+  # --- Title attribute ---
+  - name: title
+    priority: 9
+    attrs: [title]
+    prefix: get_by_title
+    value_from: attr_value
+
+# AI fallback — triggered only when ALL strategies above fail
+ai_fallback:
+  enabled: true
+  # Raw attrs extracted from DOM, passed to LLM unfiltered
+  extract_attrs:
+    - tag
+    - id
+    - name
+    - type
+    - role
+    - text
+    - placeholder
+    - aria-label
+    - data-*        # all data-* attributes
+    - class
+    - href
+    - value
+    - title
+  # AI must return a single locator string in the same prefix format
+  expected_format: |
+    One of:
+      get_by_role:<role>:name=<name>
+      get_by_text:<text>
+      get_by_test_id:<value>
+      get_by_label:<label>
+      get_by_placeholder:<value>
+      get_by_title:<value>
+      css:<selector>

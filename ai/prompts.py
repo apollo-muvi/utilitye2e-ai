@@ -62,3 +62,23 @@ User selected these elements to test:
 
 Login URL: {login_url}
 """
+
+LOCATOR_FALLBACK_PROMPT = """\
+You are a Playwright locator expert. Given the raw attributes of a single DOM \
+element, produce ONE locator string that uniquely identifies it.
+
+Valid formats (use the best one for this element):
+  get_by_test_id:<value>          — if data-testid/data-test-id exists
+  get_by_role:<role>:name=<name>  — role + accessible name
+  get_by_label:<label>            — for form fields with associated label
+  get_by_placeholder:<value>      — for inputs with placeholder
+  get_by_text:<text>              — for buttons/links with visible text
+  get_by_title:<title>            — if title attribute exists
+  css:<selector>                  — any valid CSS selector
+
+Rules:
+1. Output ONLY the locator string, nothing else.
+2. Prefer semantic locators (get_by_role, get_by_label) over CSS.
+3. Choose the most specific and stable attribute.
+4. If the element has data-testid or data-cy, always prefer that.
+"""

@@ -3,8 +3,16 @@ Page Inspector v2 — crawls a web page and builds a rich interactive element ma
 """
 
 import asyncio
+import json
 import re
 from typing import Any, Dict
+
+
+def _get_strategies_json() -> str:
+    """Load locator strategies from YAML, return as JSON string for JS injection."""
+    from core.locator_resolver import LocatorResolver
+    resolver = LocatorResolver.from_yaml()
+    return resolver.get_strategies_js()
 
 
 async def inspect_page(
@@ -84,57 +92,154 @@ async def inspect_page(
         await page.wait_for_timeout(1500)
 
         # Extract element map via JavaScript
-        result = await page.evaluate("""() => {
+        strategies_json = _get_strategies_json()
+        result = await page.evaluate("""(strategiesJson) => {
+            const strategies = JSON.parse(strategiesJson);
             const elements = [];
             let nextId = 1;
 
+            // ── Data-driven locator engine ──────────────────────
+            // No hardcoded selector logic. Everything driven by strategies config.
+
+            function extractAttrValue(el, attrs) {
+                for (const a of attrs) {
+                    const v = el.getAttribute(a);
+                    if (v) return { attr: a, value: v };
+                }
+                return null;
+            }
+
+            function evalCondition(expr, el, value) {
+                if (!expr) return true;
+                try {
+                    const tag = el.tagName.toLowerCase();
+                    const role = el.getAttribute('role') || '';
+                    return Function('el', 'value', 'tag', 'role',
+                        `return (${expr});`
+                    )(el, value, tag, role);
+                } catch(e) { return false; }
+            }
+
+            function extractValue(el, strategy) {
+                const vf = strategy.value_from;
+                if (vf === 'attr_value') {
+                    const r = extractAttrValue(el, strategy.attrs);
+                    return r ? r.value : '';
+                }
+                if (vf === 'text_content') {
+                    return (el.textContent || '').trim().substring(0, 60);
+                }
+                if (vf === 'label_text_for_id') {
+                    const id = el.id;
+                    if (!id) return '';
+                    const lbl = document.querySelector(`label[for="${id}"]`);
+                    return lbl ? lbl.textContent.trim() : '';
+                }
+                return '';
+            }
+
+            function formatLocator(strategy, el, value, attr) {
+                const p = strategy.prefix;
+                const tag = el.tagName.toLowerCase();
+
+                // get_by_test_id:<value>
+                if (p === 'get_by_test_id')
+                    return `get_by_test_id:${value}`;
+
+                // get_by_role:<role>:name=<name>
+                if (p === 'get_by_role') {
+                    let role = '';
+                    if (strategy.role_from) {
+                        try {
+                            role = Function('el',
+                                `const tag = el.tagName.toLowerCase();
+                                 const role = el.getAttribute('role') || '';
+                                 return (${strategy.role_from});`
+                            )(el);
+                        } catch(e) {
+                            role = el.getAttribute('role') || tag;
+                        }
+                    } else {
+                        role = el.getAttribute('role') || tag;
+                    }
+                    return `get_by_role:${role}:name=${value}`;
+                }
+
+                // get_by_label:<label>
+                if (p === 'get_by_label')
+                    return `get_by_label:${value}`;
+
+                // get_by_placeholder:<value>
+                if (p === 'get_by_placeholder')
+                    return `get_by_placeholder:${value}`;
+
+                // get_by_text:<text>
+                if (p === 'get_by_text')
+                    return `get_by_text:${value}`;
+
+                // get_by_title:<value>
+                if (p === 'get_by_title')
+                    return `get_by_title:${value}`;
+
+                // css_id → #<value>
+                if (p === 'css_id')
+                    return `css_id:${value}`;
+
+                // css_attr → [{attr}="{value}"]  (stored as css:...)
+                if (p === 'css_attr') {
+                    if (strategy.value_template) {
+                        return `css:${strategy.value_template
+                            .replace('{value}', value.replace(/"/g, '\\\\"'))
+                            .replace('{attr}', attr || strategy.attrs[0])
+                            .replace('{tag}', tag)}`;
+                    }
+                    return `css:[${attr || strategy.attrs[0]}="${value}"]`;
+                }
+
+                return '';
+            }
+
             function computeLocators(el) {
                 const locs = [];
+                for (const s of strategies) {
+                    // Check condition first (if defined)
+                    // For attr-based strategies, extract value to test condition
+                    let value = '';
+                    let attr = '';
 
-                const tid = el.getAttribute('data-testid') || el.getAttribute('data-test-id');
-                if (tid) {
-                    locs.push(`[data-testid="${tid}"]`);
-                    locs.push(`get_by_test_id:${tid}`);
-                }
-
-                if (el.id && el.id.length > 2) {
-                    locs.push(`#${CSS.escape(el.id)}`);
-                }
-
-                const ariaLabel = el.getAttribute('aria-label');
-                if (ariaLabel) {
-                    locs.push(`get_by_role:${el.role || el.tagName.toLowerCase()}:name=${ariaLabel}`);
-                    locs.push(`[aria-label="${ariaLabel.replace(/"/g, '\\\\"')}"]`);
-                }
-
-                if (el.id) {
-                    const label = document.querySelector(`label[for="${el.id}"]`);
-                    if (label) {
-                        locs.push(`get_by_label:${label.textContent.trim()}`);
+                    if (s.attrs && s.attrs.length > 0) {
+                        const r = extractAttrValue(el, s.attrs);
+                        if (!r) continue;
+                        value = r.value;
+                        attr = r.attr;
+                    } else if (s.value_from === 'text_content') {
+                        value = (el.textContent || '').trim().substring(0, 60);
                     }
-                }
 
-                if (el.name) {
-                    const tag = el.tagName.toLowerCase();
-                    if (el.type && el.type !== 'text') {
-                        locs.push(`${tag}[name="${el.name}"][type="${el.type}"]`);
+                    if (!value) continue;
+
+                    // Evaluate condition
+                    if (!evalCondition(s.condition, el, value)) continue;
+
+                    // For label_text_for_id, value is extracted differently
+                    if (s.value_from === 'label_text_for_id') {
+                        value = extractValue(el, s);
+                        if (!value) continue;
                     }
-                    locs.push(`${tag}[name="${el.name}"]`);
+
+                    const loc = formatLocator(s, el, value, attr);
+                    if (loc) locs.push(loc);
                 }
 
-                if (el.placeholder) {
-                    locs.push(`get_by_placeholder:${el.placeholder}`);
-                    locs.push(`${el.tagName.toLowerCase()}[placeholder="${el.placeholder.replace(/"/g, '\\\\"')}"]`);
-                }
-
+                // Always add a text-based fallback for buttons/links
                 const text = (el.textContent || '').trim();
-                if (text && text.length < 60 && !el.name && !el.placeholder) {
+                if (text && text.length < 60 && text.length >= 2) {
                     if (el.role === 'button' || el.tagName === 'BUTTON' || el.tagName === 'A') {
-                        locs.push(`get_by_role:button:name=${text}`);
-                        locs.push(`get_by_text:${text}`);
                         const cleanText = text.replace(/^[+\\-*·•\\s]+/, '').trim();
-                        if (cleanText && cleanText !== text && cleanText.length >= 2) {
-                            locs.push(`get_by_text:${cleanText}`);
+                        if (cleanText && cleanText.length >= 2) {
+                            // Avoid duplicates
+                            if (!locs.some(l => l.includes(cleanText)))
+                                locs.push(`get_by_text:${cleanText}`);
                         }
                     }
                 }
@@ -216,7 +321,7 @@ async def inspect_page(
             });
 
             return { elements: elements, headings: headings, total_elements: elements.length };
-        }""")
+        }""", strategies_json)
 
         result["url"] = page.url
         result["title"] = await page.title()

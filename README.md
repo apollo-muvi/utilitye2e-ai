@@ -21,6 +21,8 @@ The runner uses **DOM snapshot diffing**: snapshot before click → click → sn
 - **DOM diff, not classification** — click → compare DOM before/after. Generic, works on any UI.
 - **Generic deep scan** — discover crawls every button, clicks it, fills any revealed form, submits, and collects new buttons. No hardcoded keywords.
 - **Config-free targets** — all connection info (target URL, login, credentials) entered in the Web UI, not config files.
+- **Config-driven locator strategies** — selector types defined in YAML, not code. Add a new selector type (e.g. `data-cy`) = add one YAML block. Zero code changes.
+- **Three-layer locator resolution** — Config strategies (fast) → AI fallback (smart) → Fuzzy text match (last resort). Maximizes element location success rate.
 
 ## Quick start
 
@@ -52,13 +54,20 @@ utilitye2e-ai web
 
 ```
 core/
-├── spec.py        # TestSpec, TestStep (button + desc + fill_fields)
-└── runner.py      # DOM snapshot diff engine (click → snapshot → compare → reload)
+├── spec.py             # TestSpec, TestStep (button + desc + fill_fields)
+├── runner.py           # DOM snapshot diff engine (click → snapshot → compare → reload)
+├── executor.py         # Executes action plans; uses LocatorResolver (config + AI fallback)
+└── locator_resolver.py # Config-driven locator builder — dispatch table, no hardcoded if/elif
 
 ai/
-├── analyzer.py    # AI generates steps from DOM + selected elements
-├── prompts.py     # System/user prompts for LLM
-└── page_crawler.py # Deep scan: click → fill form → submit → collect new buttons
+├── analyzer.py         # AI generates steps from DOM + selected elements
+├── prompts.py          # System/user prompts + LOCATOR_FALLBACK_PROMPT
+├── page_crawler.py     # Deep scan: click → fill form → submit → collect new buttons
+├── page_inspector.py   # Browser-side JS locator engine (data-driven from YAML config)
+└── locator_ai.py       # AI fallback: raw element attrs → LLM → locator string
+
+config/
+└── locator_strategies.yaml  # Single source of truth for all selector types
 
 web/
 ├── app.py              # Flask API: /api/ai/discover, /analyze, /run
@@ -77,6 +86,36 @@ cli.py             # CLI entry point
 | **SchemaAdapter** | Read table/column info | Manual JSON | PostgreSQL, SQLite, MySQL |
 | **LLMAdapter** | Analyze DOM → TestSpec | GLM (z.ai), OpenAI, Ollama | Any provider |
 | **Runner** | Execute test via DOM diff | Playwright | Other engines |
+
+## Locator strategies
+
+All selector types are defined in `config/locator_strategies.yaml` — the single source of truth shared by the browser-side JS inspector and the Python-side executor.
+
+### Adding a new selector type
+
+Add one strategy block to the YAML:
+
+```yaml
+strategies:
+  - name: data_cy              # your custom selector
+    priority: 2                # lower = tried first
+    attrs: [data-cy, data-qa]  # DOM attributes to check
+    prefix: css_attr           # how executor resolves it
+    value_template: '[{attr}="{value}"]'
+```
+
+No code changes needed. Both the inspector (JS) and executor (Python) read this config automatically.
+
+### Resolution order
+
+```
+1. Config strategies (fast path)
+   → tries each strategy by priority until one resolves
+2. AI fallback (smart path)
+   → if all config strategies fail, raw element attrs → LLM → locator string
+3. Fuzzy text match (last resort)
+   → substring matching for text-based locators
+```
 
 ## Test Step format
 
