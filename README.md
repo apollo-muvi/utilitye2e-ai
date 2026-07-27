@@ -169,6 +169,8 @@ MIT
 - **Value**: within 30 seconds, know which buttons on a page are clickable and whether clicking them causes a DOM change
 - **Zero-code**: fill URL → select elements → AI generates → one-click run
 - **Framework-agnostic**: DOM diff works on React, Vue, Angular, vanilla JS — no framework-specific logic
+- **Config-driven locators**: selector types defined in YAML — add `data-cy`, `data-qa`, etc. without touching code
+- **Three-layer resolution**: Config strategies → AI fallback → Fuzzy text match — maximizes element location success rate
 
 ### Known limitations
 
@@ -179,12 +181,11 @@ MIT
 | Step ordering has state dependencies | Must create before delete; no automatic prerequisite ordering yet |
 | Complex interactions unsupported | Drag-and-drop, file upload, multi-tab, iframes |
 | Simple reports | Only DOM +/- counts; no screenshot, trace, or shareable format |
-| No flakiness handling | Fixed timeouts, no retry or smart wait |
+| Timeout handling | Locator resolution is resilient (3-layer), but waits still use fixed timeouts — no smart retry yet |
 
 ### Phase 2 — planned improvements
 
 - Reload verification (save → reload → confirm data persisted)
 - AI auto-orders steps (create → edit → delete sequence)
 - Per-step screenshot + HTML snapshot evidence
-- Export Playwright script (for engineers to take over and fine-tune)
 - Smart wait with retry to reduce flakiness
