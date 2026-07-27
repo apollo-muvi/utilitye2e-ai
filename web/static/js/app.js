@@ -12,6 +12,20 @@ document.addEventListener("DOMContentLoaded", async () => {
     document.getElementById("btn-logout").addEventListener("click", logout);
     document.getElementById("btn-add-step").addEventListener("click", () => addStepRow({button:"",desc:"",fill_fields:[]}));
     document.getElementById("btn-discover").addEventListener("click", discover);
+
+    // Load config from backend
+    try {
+        const res = await fetch("/api/config");
+        const cfg = await res.json();
+        if (cfg.target) {
+            document.getElementById("txt-url").value = cfg.target.base_url || "";
+            document.getElementById("txt-login-url").value = cfg.target.login_url || "";
+            document.getElementById("txt-username").value = cfg.target.username || "";
+            document.getElementById("txt-password").value = cfg.target.password || "";
+        }
+    } catch (e) {
+        console.warn("Failed to load config:", e);
+    }
 });
 
 let discoveredElements = [];

@@ -57,10 +57,12 @@ def create_app(config: dict = None) -> Flask:
     def get_config():
         llm_cfg = config.get("llm", {})
         schema_cfg = config.get("schema", {})
+        target_cfg = config.get("target", {})
         return jsonify({
             "llm_adapter": llm_cfg.get("adapter", "openrouter"),
             "llm_model": llm_cfg.get("model", ""),
             "schema_adapter": schema_cfg.get("adapter", "postgres"),
+            "target": target_cfg,
         })
 
     @app.route("/api/shutdown", methods=["POST"])

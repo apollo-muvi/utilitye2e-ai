@@ -14,8 +14,7 @@ from playwright.async_api import async_playwright, Page
 from core.spec import TestSpec, TestStep
 from core.recorder import Recorder
 
-_BROWSER_PATH = os.environ.get("PLAYWRIGHT_BROWSERS_PATH",
-    os.path.expanduser("~/.cache/ms-playwright/chromium_headless_shell-1228/chrome-linux/headless_shell"))
+_BROWSER_PATH = os.path.expanduser("~/.cache/ms-playwright/chromium_headless_shell-1228/chrome-linux/headless_shell")
 
 
 class Runner:

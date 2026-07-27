@@ -20,8 +20,7 @@ async def _crawl_page(url: str, login_url: str = "", username: str = "", passwor
         browser = await p.chromium.launch(
             headless=True,
             args=["--disable-blink-features=AutomationControlled", "--no-sandbox"],
-            executable_path=os.environ.get("PLAYWRIGHT_BROWSERS_PATH",
-                os.path.expanduser("~/.cache/ms-playwright/chromium_headless_shell-1228/chrome-linux/headless_shell")),
+            executable_path=os.path.expanduser("~/.cache/ms-playwright/chromium_headless_shell-1228/chrome-linux/headless_shell"),
         )
         context = await browser.new_context(
             viewport={"width": 1920, "height": 1080},
