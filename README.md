@@ -185,13 +185,13 @@ MIT
 - **Framework-agnostic**: DOM diff works on React, Vue, Angular, vanilla JS — no framework-specific logic
 - **Config-driven locators**: selector types defined in YAML — add `data-cy`, `data-qa`, etc. without touching code
 - **Three-layer resolution**: Config strategies → AI fallback → Fuzzy text match — maximizes element location success rate
+- **Reload verification**: after click, reloads page and compares DOM to confirm persistence
 
 ### Known limitations
 
 | Issue | Impact |
 |-------|--------|
 | Test data not controllable | Deep scan fills "test_" fake data; production tests need controlled fixtures |
-| No persistence verification | DOM diff only checks UI changes, but "is data still there after reload?" needs a second pass |
 | Step ordering has state dependencies | Must create before delete; no automatic prerequisite ordering yet |
 | Complex interactions unsupported | Drag-and-drop, file upload, multi-tab, iframes |
 | Simple reports | Only DOM +/- counts; no screenshot, trace, or shareable format |
@@ -199,7 +199,6 @@ MIT
 
 ### Phase 2 — planned improvements
 
-- Reload verification (save → reload → confirm data persisted)
 - AI auto-orders steps (create → edit → delete sequence)
 - Per-step screenshot + HTML snapshot evidence
 - Smart wait with retry to reduce flakiness
