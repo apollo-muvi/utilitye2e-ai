@@ -1,0 +1,18 @@
+# utilitye2e-ai Requirements
+
+# Web Framework
+Flask>=3.0.0
+Flask-CORS>=4.0.0
+
+# Configuration
+PyYAML>=6.0
+python-dotenv>=1.0.0
+
+# HTTP Client
+requests>=2.31.0
+
+# Database Adapters
+psycopg2-binary>=2.9.0
+
+# Browser Automation
+playwright>=1.40.0

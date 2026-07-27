@@ -1,3 +1,9 @@
-__pycache__/\n*.pyc\n.env\nconfig.yaml\noutput/\n/tmp/\n
-.env
 __pycache__/
+*.pyc
+.env
+config.yaml
+output/
+tmp/
+.venv/
+venv/
+utilitye2e_ai.egg-info/
