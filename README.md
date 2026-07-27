@@ -1,5 +1,7 @@
 # utilitye2e-ai
 
+English | [繁體中文](README.zh-TW.md)
+
 Open-source E2E test generator — AI discovers page elements, generates test steps, and runs them via Playwright with DOM snapshot diffing.
 
 ## How it works
