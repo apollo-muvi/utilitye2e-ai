@@ -121,22 +121,34 @@ No code changes needed. Both the inspector (JS) and executor (Python) read this 
 
 ```json
 {
-  "name": "家長管理測試",
+  "name": "User management test",
   "target": {
-    "url": "https://example.com/parents",
+    "url": "https://example.com/admin/users",
     "login_url": "https://example.com/login",
     "username": "admin",
     "password": "admin"
   },
   "steps": [
-    { "button": "新增家長", "desc": "開啟新增表單", "fill_fields": [] },
-    { "button": "儲存", "desc": "儲存家長資料", "fill_fields": ["姓名", "電話"] },
-    { "button": "綁定學生", "desc": "測試綁定學生功能", "fill_fields": [] },
-    { "button": "產生 QR Code", "desc": "產生家長 QR Code", "fill_fields": [] },
-    { "button": "刪除", "desc": "刪除家長", "fill_fields": [] }
+    { "button": "Add User", "desc": "Open the add-user form", "fill_fields": [] },
+    {
+      "button": "Save",
+      "desc": "Fill form and save",
+      "fill_fields": [
+        { "name": "username", "label": "Username", "value": "test_user", "field_type": "text", "required": true },
+        { "name": "email", "label": "Email", "value": "test@example.com", "field_type": "email", "required": true }
+      ]
+    },
+    { "button": "Edit", "desc": "Edit the created user", "fill_fields": [], "row": 1 },
+    { "button": "Delete", "desc": "Delete the user", "fill_fields": [], "row": 1 }
   ]
 }
 ```
+
+Each step has:
+- `button` — exact button text from DOM (matched via locator strategies)
+- `desc` — human-readable description
+- `fill_fields` — form fields to fill before clicking (empty = just click)
+- `row` — 1-based row index for buttons repeated in table rows (0 or omitted = first match)
 
 ## Configuration
 
