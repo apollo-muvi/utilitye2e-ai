@@ -33,26 +33,14 @@ async def _crawl_page(url: str, login_url: str = "", username: str = "", passwor
             Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
         """)
 
-        # Login: step 1 — go to root domain, enter tenant ID
+        # Login: go directly to login URL
         if login_url and username:
             try:
-                from urllib.parse import urlparse
-                root_url = f"{urlparse(login_url).scheme}://{urlparse(login_url).netloc}/"
-                print(f"  → Step 1: tenant portal: {root_url}")
-                await page.goto(root_url, wait_until="networkidle")
+                print(f"  → Login: {login_url}")
+                await page.goto(login_url, wait_until="networkidle")
                 await page.wait_for_timeout(2000)
 
-                # Fill tenant ID if input exists
-                tenant_input = page.locator('input[placeholder*="租戶"], input[placeholder*="tenant"]')
-                if await tenant_input.count():
-                    tenant_id = urlparse(login_url).path.split("/t/")[1].split("/")[0]
-                    await tenant_input.fill(tenant_id)
-                    await page.get_by_role("button", name="進入").click()
-                    await page.wait_for_timeout(3000)
-                    print(f"  → Step 2: redirected to {page.url}")
-
                 # Fill login form (placeholder-based SPA forms)
-                print(f"  → Step 3: login as {username}")
                 u_sel = 'input[placeholder*="帳號"], input[placeholder*="account"], input[type="text"]'
                 await page.locator(u_sel).first.fill(username)
                 await page.wait_for_timeout(300)
