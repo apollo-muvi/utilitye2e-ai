@@ -33,56 +33,95 @@ async def _crawl_page(url: str, login_url: str = "", username: str = "", passwor
             Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
         """)
 
-        # Login if needed
+        # Login: step 1 — go to root domain, enter tenant ID
         if login_url and username:
             try:
-                print(f"  → Login: {login_url}")
-                await page.goto(login_url, wait_until="networkidle")
+                from urllib.parse import urlparse
+                root_url = f"{urlparse(login_url).scheme}://{urlparse(login_url).netloc}/"
+                print(f"  → Step 1: tenant portal: {root_url}")
+                await page.goto(root_url, wait_until="networkidle")
                 await page.wait_for_timeout(2000)
 
-                # Fill username (try name attr first, then type=text, then placeholder)
-                u_sel = 'input[name="username"]'
-                if not await page.locator(u_sel).count():
-                    u_sel = 'input[type="text"]'
-                if not await page.locator(u_sel).count():
-                    u_sel = 'input[placeholder*="帳號"]'
+                # Fill tenant ID if input exists
+                tenant_input = page.locator('input[placeholder*="租戶"], input[placeholder*="tenant"]')
+                if await tenant_input.count():
+                    tenant_id = urlparse(login_url).path.split("/t/")[1].split("/")[0]
+                    await tenant_input.fill(tenant_id)
+                    await page.get_by_role("button", name="進入").click()
+                    await page.wait_for_timeout(3000)
+                    print(f"  → Step 2: redirected to {page.url}")
+
+                # Fill login form (placeholder-based SPA forms)
+                print(f"  → Step 3: login as {username}")
+                u_sel = 'input[placeholder*="帳號"], input[placeholder*="account"], input[type="text"]'
                 await page.locator(u_sel).first.fill(username)
                 await page.wait_for_timeout(300)
 
-                # Fill password
-                p_sel = 'input[name="password"]'
-                if not await page.locator(p_sel).count():
-                    p_sel = 'input[type="password"]'
+                p_sel = 'input[type="password"]'
                 await page.locator(p_sel).first.fill(password)
                 await page.wait_for_timeout(300)
 
-                # Click login button
                 await page.get_by_role("button", name="登入").click()
                 await page.wait_for_timeout(3000)
+                print(f"  → Logged in: {page.url}")
             except Exception as e:
                 print(f"  → Login failed: {e}")
 
-        # Navigate to target page
-        await page.goto(url, wait_until="networkidle")
-        await page.wait_for_timeout(2000)
+        # SPA-aware navigation: after login we're already on the SPA.
+        # Doing page.goto(url) would reload the entire app and the router
+        # resets to the home page, losing the deep-link target.
+        # Instead, navigate within the SPA using client-side routing.
+        from urllib.parse import urlparse
+        target_path = urlparse(url).path  # e.g. /t/{tenant}/ctb/users
 
-        # SPA support: Wait for content to render
-        # Check if page appears to be an SPA (empty main container, many scripts)
-        is_spa = await page.evaluate("""
-            () => {
-                const main = document.getElementById('main-container');
-                return main && main.children.length === 0;
-            }
-        """)
-
-        if is_spa:
-            # Wait for SPA to render content
+        if target_path and target_path != "/":
+            # SPA navigation: expand sidebar groups + click target link in one JS call
+            navigated = False
             try:
-                await page.wait_for_selector("#main-container > *", timeout=10000)
-                await page.wait_for_timeout(1000)  # Extra buffer for animations
-            except Exception:
-                # Fallback: wait for any content to appear
-                await page.wait_for_timeout(3000)
+                clicked = await page.evaluate("""(path) => {
+                    // Expand all collapsed sidebar groups
+                    document.querySelectorAll('[class*="sidebar-divider"]').forEach(el => {
+                        if (el.textContent.includes('\u25b8')) el.click();
+                    });
+                    // Small delay then click target link
+                    return new Promise(resolve => {
+                        setTimeout(() => {
+                            const links = document.querySelectorAll('a[href]');
+                            for (const a of links) {
+                                if (a.getAttribute('href').indexOf(path) !== -1) {
+                                    a.click();
+                                    resolve(true);
+                                    return;
+                                }
+                            }
+                            resolve(false);
+                        }, 800);
+                    });
+                }""", target_path)
+                if clicked:
+                    await page.wait_for_timeout(3000)
+                    if target_path in page.url:
+                        print(f"  → SPA nav: {page.url}")
+                        navigated = True
+                    else:
+                        print(f"  → Link clicked but URL unchanged ({page.url})")
+            except Exception as e:
+                print(f"  → SPA nav failed ({e})")
+
+            if not navigated:
+                print(f"  → Fallback goto (may reset to home)")
+                await page.goto(url, wait_until="networkidle")
+                await page.wait_for_timeout(2000)
+        else:
+            await page.goto(url, wait_until="networkidle")
+            await page.wait_for_timeout(2000)
+
+        # Wait for SPA content to render
+        try:
+            await page.wait_for_selector("#main-container > *", timeout=10000)
+            await page.wait_for_timeout(1000)
+        except Exception:
+            await page.wait_for_timeout(3000)
 
         # Extract DOM info via JavaScript
         extract_js = """() => {
@@ -151,18 +190,22 @@ async def _crawl_page(url: str, login_url: str = "", username: str = "", passwor
 
         dom_info = await page.evaluate(extract_js)
 
-        # ── Deep scan: click each button → fill form if revealed → save → collect new buttons ──
-        # Generic DOM diff approach: no hardcoded keywords.
+        # ── Deep scan: click non-destructive buttons → record form structure (no submit) ──
         seen_texts = {b["text"] for b in dom_info.get("buttons", [])}
         skip = {"登出", "Logout", "Sign out", "☰"}
+        destructive = {"刪除", "delete", "remove", "移除", "清除", "clear"}
 
         for btn_info in list(dom_info.get("buttons", [])):
             btn_text = btn_info["text"]
             if btn_text in skip:
                 continue
+            if any(d in btn_text.lower() for d in destructive):
+                continue
             try:
                 btn = page.locator(f'button:has-text("{btn_text}")').first
                 if not await btn.is_visible():
+                    continue
+                if not await btn.is_enabled():
                     continue
                 print(f"  → Deep scan: clicking [{btn_text}]...")
                 await btn.click()
@@ -173,55 +216,27 @@ async def _crawl_page(url: str, login_url: str = "", username: str = "", passwor
                 new_inputs = dom_after.get("inputs", [])
 
                 if new_inputs:
-                    print(f"    Form revealed ({len(new_inputs)} inputs), filling...")
-                    # Fill all visible text inputs generically
-                    for inp_el in await page.query_selector_all('input:not([type="hidden"]):not([type="submit"]):not([type="button"]), textarea'):
-                        tag = await inp_el.evaluate("e => e.tagName.toLowerCase()")
-                        itype = await inp_el.evaluate("e => e.type")
-                        if tag == "select" or itype == "select":
-                            try: await inp_el.select_option(index=1)
-                            except: pass
-                            continue
-                        ph = await inp_el.get_attribute('placeholder') or ''
-                        val = "test_" + (ph[:10] if ph else "input")
-                        if itype in ("email",):
-                            val = "test@test.com"
-                        elif itype in ("tel", "number"):
-                            val = "0912345678"
-                        elif itype in ("password",):
-                            continue
-                        try: await inp_el.fill(val)
-                        except: pass
-                    # Fill selects
-                    for sel_el in await page.query_selector_all('select'):
-                        try: await sel_el.select_option(index=1)
-                        except: pass
+                    print(f"    Form revealed ({len(new_inputs)} inputs), recording structure (no submit)")
 
-                    # Find & click a submit button in the new DOM
+                    # Record form structure — do NOT fill or submit
+                    for inp in new_inputs:
+                        if inp not in dom_info["inputs"]:
+                            dom_info["inputs"].append(inp)
                     for b2 in dom_after.get("buttons", []):
-                        if b2["text"] in skip:
-                            continue
-                        if b2["text"] in seen_texts:
-                            continue
-                        # Heuristic: submit buttons often last, click first new non-cancel button
-                        if "取消" in b2["text"] or "Cancel" in b2["text"]:
-                            continue
-                        try:
-                            sub_btn = page.locator(f'button:has-text("{b2["text"]}")').first
-                            if await sub_btn.is_visible():
-                                print(f"    Clicking [{b2['text']}] to submit...")
-                                await sub_btn.click()
-                                await page.wait_for_timeout(3000)
-                                break
-                        except: pass
+                        if b2["text"] not in seen_texts:
+                            dom_info["buttons"].append(b2)
+                            seen_texts.add(b2["text"])
 
-                # Final snapshot after interaction
-                dom_final = await page.evaluate(extract_js)
-                for b3 in dom_final.get("buttons", []):
-                    if b3["text"] not in seen_texts:
-                        dom_info["buttons"].append(b3)
-                        seen_texts.add(b3["text"])
-                        print(f"    + Found: {b3['text']}")
+                    # Close the form (click cancel/close) to restore page state
+                    for close_text in ["取消", "Cancel", "關閉", "Close", "✕"]:
+                        try:
+                            close_btn = page.locator(f'button:has-text("{close_text}")').first
+                            if await close_btn.is_visible():
+                                await close_btn.click()
+                                await page.wait_for_timeout(1000)
+                                break
+                        except:
+                            pass
 
                 # Reload to reset state
                 await page.goto(url, wait_until="networkidle")
