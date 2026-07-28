@@ -6,7 +6,7 @@ llm:
   api_key: ${OPENROUTER_API_KEY}
 
 target:
-  base_url: ""
-  login_url: ""
-  username: ""
-  password: ""
+  base_url: "https://tutor.classtutorbot.com/t/ctb-premium-demo/ctb/users"
+  login_url: "https://tutor.classtutorbot.com/t/ctb-premium-demo/login"
+  username: "admin"
+  password: "admin"
