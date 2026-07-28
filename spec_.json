@@ -1,0 +1,43 @@
+{
+  "name": "Test users CRUD",
+  "target": {
+    "url": "https://tutor.classtutorbot.com/t/ctb-premium-demo/ctb/users",
+    "login_url": "https://tutor.classtutorbot.com/t/ctb-premium-demo/login",
+    "username": "admin",
+    "password": "admin"
+  },
+  "table": "",
+  "steps": [
+    {
+      "button": "📝聯絡簿使用",
+      "desc": "Click 聯絡簿使用 button to navigate to contact book",
+      "fill_fields": [],
+      "row": 0
+    },
+    {
+      "button": "👥學員管理",
+      "desc": "Click 學員管理 button to navigate to student management",
+      "fill_fields": [],
+      "row": 0
+    },
+    {
+      "button": "❓常見問題",
+      "desc": "Click 常見問題 button to navigate to FAQ",
+      "fill_fields": [],
+      "row": 0
+    },
+    {
+      "button": "↑",
+      "desc": "Click scroll to top button",
+      "fill_fields": [],
+      "row": 0
+    },
+    {
+      "button": "Logout",
+      "desc": "Click Logout button to log out",
+      "fill_fields": [],
+      "row": 0
+    }
+  ],
+  "fields": []
+}
