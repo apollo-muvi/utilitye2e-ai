@@ -110,8 +110,8 @@ EXTRACT_JS = """() => {
         }
     });
 
-    // Nav items (common patterns: li in nav, [role=menuitem], sidebar items)
-    document.querySelectorAll('nav li, [role=menuitem], .nav-item, .menu-item, .side-item, [class*=nav] li, [class*=menu] li').forEach(item => {
+    // Nav items (common patterns: li in nav, [role=menuitem], sidebar items, dashboard links)
+    document.querySelectorAll('nav li, [role=menuitem], .nav-item, .menu-item, .side-item, [class*=nav] li, [class*=menu] li, [class*=sidebar] a, [class*=sidebar] li').forEach(item => {
         const s = getComputedStyle(item);
         if (s.display === 'none' || s.visibility === 'hidden') return;
         const text = (item.textContent || '').trim().slice(0, 50);
@@ -727,10 +727,18 @@ async def _crawl_page(url: str, login_url: str = "", username: str = "", passwor
             nav_candidates = []
             main_frame = page.main_frame
             for item in frames_data:
+                # Standard nav items (li, menuitem, etc.)
                 for nav in item.get("navItems", []):
                     text = nav.get("text", "")
                     if text and not _is_destructive(text) and not _is_skip(text):
                         if text not in nav_candidates:
+                            nav_candidates.append(text)
+                # SPA-style: buttons that act as navigation (e.g. 聯絡簿使用, 學員管理)
+                for btn in item.get("buttons", []):
+                    text = btn.get("text", "")
+                    if text and not _is_destructive(text) and not _is_skip(text):
+                        # Only include buttons that look like navigation (longer text, no form actions)
+                        if len(text) > 1 and text not in nav_candidates:
                             nav_candidates.append(text)
 
             for nav_text in nav_candidates[:max_nav_depth]:
