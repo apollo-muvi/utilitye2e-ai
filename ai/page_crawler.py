@@ -318,10 +318,23 @@ async def _extract_all_frames(page) -> List[Dict[str, Any]]:
 
 # ─── Generic login ───
 
-async def _try_login(page, login_url: str, username: str, password: str) -> bool:
+async def _try_login(page, login_url: str, username: str, password: str,
+                     tenant_id: str = "") -> bool:
     """
-    Generic login: detect password field, fill credentials, submit.
-    Works across different login form layouts.
+    Generic multi-step login for SaaS and standard login pages.
+
+    SaaS multi-tenant flow (e.g. TutorBot):
+      Step 1: text field (tenant ID / org name) + submit → redirect to login page
+      Step 2: username + password fields + submit → authenticated
+
+    Standard login:
+      Single page with username + password + submit.
+
+    Strategy:
+      1. Navigate to login_url, scan visible inputs.
+      2. If password field exists → standard login.
+      3. If only text field(s) + submit → fill tenant_id (or username), submit, wait for redirect.
+      4. Re-scan → if password field now appears → complete standard login.
     """
     try:
         await page.goto(login_url, wait_until="networkidle")
@@ -329,78 +342,162 @@ async def _try_login(page, login_url: str, username: str, password: str) -> bool
     except Exception:
         pass
 
-    # Find password field in any frame
-    target_frame = None
-    for frame in page.frames:
-        if not frame.url or frame.url == 'about:blank':
-            continue
-        try:
-            pswd = frame.locator('input[type="password"]')
-            if await pswd.count() > 0:
-                target_frame = frame
-                break
-        except Exception:
-            continue
+    MAX_STEPS = 3  # safety: at most 3 pre-auth steps (tenant, captcha, etc.)
 
-    if not target_frame:
-        print("  → No password field found, skipping login")
-        return False
+    for step_num in range(MAX_STEPS):
+        # Find the best frame to work in
+        target_frame = None
+        for frame in page.frames:
+            if not frame.url or frame.url == 'about:blank':
+                continue
+            try:
+                if await frame.locator('input').count() > 0:
+                    target_frame = frame
+                    break
+            except Exception:
+                continue
+        if not target_frame:
+            print("  → No form elements found, cannot login")
+            return False
 
-    # Fill username: try common patterns
-    u_filled = False
-    # Pattern 1: text input before password
-    try:
-        text_inputs = target_frame.locator('input[type="text"]:visible, input:not([type]):visible')
-        count = await text_inputs.count()
-        for i in range(min(count, 3)):
-            el = text_inputs.nth(i)
-            if await el.is_visible():
-                await el.fill(username)
-                u_filled = True
-                break
-    except Exception:
-        pass
+        # Check what inputs are visible
+        has_password = await target_frame.locator('input[type="password"]').count() > 0
+        visible_text = await target_frame.evaluate('''() => {
+            return [...document.querySelectorAll('input[type="text"], input:not([type])')]
+                .filter(el => {
+                    let p = el;
+                    for (let i = 0; i < 10 && p; i++) {
+                        if (getComputedStyle(p).display === 'none') return false;
+                        p = p.parentElement;
+                    }
+                    return true;
+                }).length;
+        }''')
 
-    # Fill password
-    try:
-        await target_frame.locator('input[type="password"]').first.fill(password)
-    except Exception as e:
-        print(f"  → Cannot fill password: {e}")
-        return False
+        if has_password:
+            # ─── Standard login: fill username + password, submit ───
+            print(f"  → Login step {step_num+1}: password field found, completing login")
 
-    # Submit: try multiple strategies
-    submitted = False
-    # Strategy 1: submit button
+            # Fill username (first visible text input)
+            try:
+                text_inputs = target_frame.locator('input[type="text"], input:not([type])')
+                for i in range(await text_inputs.count()):
+                    try:
+                        el = text_inputs.nth(i)
+                        visible = await target_frame.evaluate(f'''(n) => {{
+                            const inputs = document.querySelectorAll('input[type="text"], input:not([type])');
+                            let p = inputs[n];
+                            for (let i = 0; i < 10 && p; i++) {{
+                                if (getComputedStyle(p).display === 'none') return false;
+                                p = p.parentElement;
+                            }}
+                            return true;
+                        }}''', i)
+                        if visible:
+                            await el.fill(username)
+                            break
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            # Fill password
+            try:
+                await target_frame.locator('input[type="password"]').first.fill(password)
+            except Exception as e:
+                print(f"  → Cannot fill password: {e}")
+                return False
+
+            # Submit
+            submitted = await _click_submit(target_frame, page)
+            if submitted:
+                await page.wait_for_timeout(3000)
+                print(f"  → Login submitted (url: {page.url[:60]})")
+                return True
+            return False
+
+        elif visible_text > 0:
+            # ─── Pre-auth step: tenant selection, org picker, etc. ───
+            fill_value = tenant_id or username
+            print(f"  → Login step {step_num+1}: no password field, "
+                  f"filling text input as tenant/identifier step")
+
+            try:
+                text_inputs = target_frame.locator('input[type="text"], input:not([type])')
+                for i in range(await text_inputs.count()):
+                    try:
+                        el = text_inputs.nth(i)
+                        visible = await target_frame.evaluate(f'''(n) => {{
+                            const inputs = document.querySelectorAll('input[type="text"], input:not([type])');
+                            let p = inputs[n];
+                            for (let i = 0; i < 10 && p; i++) {{
+                                if (getComputedStyle(p).display === 'none') return false;
+                                p = p.parentElement;
+                            }}
+                            return true;
+                        }}''', i)
+                        if visible:
+                            await el.fill(fill_value)
+                            break
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            # Submit this step
+            submitted = await _click_submit(target_frame, page)
+            if submitted:
+                await page.wait_for_timeout(3000)
+                print(f"  → Pre-auth step submitted (url: {page.url[:60]})")
+                # Loop continues — will re-scan for password field on next page
+                continue
+            else:
+                # No submit button found — maybe just press Enter
+                try:
+                    await target_frame.locator('input[type="text"]').first.press("Enter")
+                    await page.wait_for_timeout(3000)
+                    print(f"  → Pre-auth submitted via Enter (url: {page.url[:60]})")
+                    continue
+                except Exception:
+                    print("  → Cannot proceed past pre-auth step")
+                    return False
+
+        else:
+            # No visible inputs at all — maybe already logged in?
+            print(f"  → No login form found (step {step_num+1}), may already be authenticated")
+            return step_num > 0  # True if we completed at least one step
+
+    print("  → Exceeded max login steps")
+    return False
+
+
+async def _click_submit(frame, page) -> bool:
+    """Try multiple strategies to click a submit/login button."""
     for selector in [
         'button[type="submit"]',
         'input[type="submit"]',
         'button:has-text("Login")', 'button:has-text("Sign in")', 'button:has-text("Log in")',
         'button:has-text("登入")', 'button:has-text("登录")', 'button:has-text("登錄")',
-        'button:has-text("OK")', 'button:has-text("ok")',
-        '[class*=login] button', '[class*=Login] button',
+        'button:has-text("進入")', 'button:has-text("进入")', 'button:has-text("Next")',
+        'button:has-text("下一步")', 'button:has-text("繼續")', 'button:has-text("继续")',
+        'button:has-text("OK")', 'button:has-text("ok")', 'button:has-text("確認")',
+        'button:has-text("Confirm")', 'button:has-text("Submit")',
+        '[class*=login] button', '[class*=Login] button', '[class*=submit] button',
         'a[class*=btn][class*=login]', 'a[class*=Btn][class*=Login]',
     ]:
         try:
-            btn = target_frame.locator(selector).first
-            if await btn.is_visible(timeout=1000):
-                await btn.click()
-                submitted = True
-                break
+            btn = frame.locator(selector).first
+            if await btn.count() > 0:
+                try:
+                    if await btn.is_visible(timeout=800):
+                        await btn.click()
+                        return True
+                except Exception:
+                    # Try force click
+                    await btn.click(force=True)
+                    return True
         except Exception:
             continue
-
-    # Strategy 2: press Enter on password field
-    if not submitted:
-        try:
-            await target_frame.locator('input[type="password"]').first.press("Enter")
-            submitted = True
-        except Exception:
-            pass
-
-    if submitted:
-        await page.wait_for_timeout(3000)
-        print(f"  → Login submitted (page url now: {page.url})")
-        return True
     return False
 
 
@@ -527,7 +624,7 @@ async def _navigate_step(page, frame, label: str) -> bool:
 
 async def _crawl_page(url: str, login_url: str = "", username: str = "", password: str = "",
                       deep_scan: bool = False, max_nav_depth: int = 0,
-                      nav_steps: list = None) -> Dict[str, Any]:
+                      nav_steps: list = None, tenant_id: str = "") -> Dict[str, Any]:
     """
     Crawl a page and extract full DOM structure.
 
@@ -566,25 +663,35 @@ async def _crawl_page(url: str, login_url: str = "", username: str = "", passwor
         """)
 
         # Phase 1: Login if needed
+        logged_in = False
         if login_url and username:
             print(f"→ Login: {login_url}")
-            await _try_login(page, login_url, username, password)
+            logged_in = await _try_login(page, login_url, username, password, tenant_id)
 
         # Phase 2: Navigate to entry URL
-        print(f"→ Navigate: {url}")
-        try:
-            await page.goto(url, wait_until="networkidle")
-        except Exception:
+        # Skip if we just logged in at the same URL — we're already on the app
+        if logged_in and login_url.rstrip('/') == url.rstrip('/'):
+            print(f"→ Already on target page after login (url: {page.url[:60]})")
+        else:
+            print(f"→ Navigate: {url}")
             try:
-                await page.goto(url, wait_until="domcontentloaded")
-            except Exception as e:
-                print(f"  → Navigation warning: {e}")
+                await page.goto(url, wait_until="networkidle")
+            except Exception:
+                try:
+                    await page.goto(url, wait_until="domcontentloaded")
+                except Exception as e:
+                    print(f"  → Navigation warning: {e}")
         await page.wait_for_timeout(3000)
 
         # Phase 2b: Dismiss overlays + handle credential modals
+        # Skip credential modal if we just attempted SaaS login and are still on a login page
         await _dismiss_overlays(page)
-        await _handle_credential_modal(page, username or "admin", password or "admin")
-        await _dismiss_overlays(page)
+        on_login_page = '/login' in page.url.lower() or 'login' in page.url.lower()
+        if logged_in and on_login_page:
+            print("  → Skipping credential modal (SaaS login page detected)")
+        else:
+            await _handle_credential_modal(page, username or "admin", password or "admin")
+            await _dismiss_overlays(page)
 
         # ─── TARGETED MODE: navigate to specific page ───
         if nav_steps:
@@ -668,7 +775,7 @@ async def _crawl_page(url: str, login_url: str = "", username: str = "", passwor
 
 def crawl_page(url: str, login_url: str = "", username: str = "", password: str = "",
                deep_scan: bool = False, max_nav_depth: int = 0,
-               nav_steps: list = None) -> Dict[str, Any]:
+               nav_steps: list = None, tenant_id: str = "") -> Dict[str, Any]:
     """Sync wrapper for _crawl_page."""
     return asyncio.run(_crawl_page(url, login_url, username, password,
-                                   deep_scan, max_nav_depth, nav_steps or []))
+                                   deep_scan, max_nav_depth, nav_steps or [], tenant_id))
