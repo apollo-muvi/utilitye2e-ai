@@ -56,17 +56,14 @@ class Runner:
         return self.recorder.summary()
 
     async def _login(self, page: Page):
+        """Delegate to page_crawler._try_login for robust multi-step SaaS login."""
         t = self.spec.target
         if not t.login_url or not t.username:
             return
         url = t.login_url if t.login_url.startswith("http") else f"{t.url.rstrip('/')}/{t.login_url.lstrip('/')}"
         print(f"  → Login: {url}")
-        await page.goto(url, wait_until="networkidle")
-        await page.wait_for_timeout(2000)
-        await page.fill('input[type="text"]', t.username)
-        await page.fill('input[type="password"]', t.password)
-        await page.click('button:has-text("登入")')
-        await page.wait_for_timeout(3000)
+        from ai.page_crawler import _try_login
+        await _try_login(page, url, t.username, t.password)
 
     # ─── DOM snapshot ───
     async def _snapshot(self, page: Page) -> str:
