@@ -781,9 +781,43 @@ async def _crawl_page(url: str, login_url: str = "", username: str = "", passwor
         }
 
 
+def _flatten_frames(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Merge all frame data into top-level keys so consumers don't need to
+    know about frames vs. single-page.
+
+    After this, result always has: buttons, inputs, selects, tableHeaders,
+    links, navItems (merged + deduplicated from all frames).
+    """
+    merged = {k: [] for k in ("buttons", "inputs", "selects", "tableHeaders", "links", "navItems")}
+    for frame in result.get("frames", []):
+        for key in merged:
+            merged[key].extend(frame.get(key, []))
+    # Deduplicate tableHeaders and links by text/href
+    seen_th = set()
+    deduped_th = []
+    for th in merged["tableHeaders"]:
+        if th not in seen_th:
+            seen_th.add(th)
+            deduped_th.append(th)
+    merged["tableHeaders"] = deduped_th
+
+    seen_link = set()
+    deduped_links = []
+    for link in merged["links"]:
+        key = (link.get("text", ""), link.get("href", ""))
+        if key not in seen_link:
+            seen_link.add(key)
+            deduped_links.append(link)
+    merged["links"] = deduped_links
+
+    result.update(merged)
+    return result
+
+
 def crawl_page(url: str, login_url: str = "", username: str = "", password: str = "",
                deep_scan: bool = False, max_nav_depth: int = 0,
                nav_steps: list = None, tenant_id: str = "") -> Dict[str, Any]:
-    """Sync wrapper for _crawl_page."""
-    return asyncio.run(_crawl_page(url, login_url, username, password,
-                                   deep_scan, max_nav_depth, nav_steps or [], tenant_id))
+    """Sync wrapper for _crawl_page. Adds flattened top-level keys for all consumers."""
+    result = asyncio.run(_crawl_page(url, login_url, username, password,
+                                     deep_scan, max_nav_depth, nav_steps or [], tenant_id))
+    return _flatten_frames(result)

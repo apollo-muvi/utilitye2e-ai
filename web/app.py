@@ -99,28 +99,32 @@ def create_app(config: dict = None) -> Flask:
                 from ai.page_crawler import crawl_page
                 dom = crawl_page(url=target_url, login_url=login_url, username=username, password=password)
 
-                # Build selectable element list
+                # Build selectable element list from flattened top-level keys
+                # (crawl_page always provides buttons/inputs/tableHeaders at top level)
                 elements = []
                 skip_labels = {"☰", "登出", "Logout", "Sign out", "取消", "儲存", "Cancel", "Save"}
+                seen_labels = set()
                 for btn in dom.get("buttons", []):
-                    t = btn["text"].strip()
-                    if t and len(t) < 40 and t not in skip_labels:
-                        el = {"type": "button", "label": t, "text": t}
-                        if btn.get("row", 0) > 0:
-                            el["row"] = btn["row"]
-                            el["occurrence"] = btn.get("occurrence", 1)
-                            el["rowLabel"] = btn.get("rowLabel", "")
-                            el["isRepeated"] = btn.get("isRepeated", False)
-                        elements.append(el)
-                # Also include table row structure
-                for tr in dom.get("tableRows", []):
-                    elements.append({"type": "tableRow", "label": tr.get("label",""), "text": f"行{tr.get('index','')}: {tr.get('label','')} [{', '.join(tr.get('buttons',[]))}]"})
+                    t = btn.get("text", "").strip()
+                    if not t or len(t) >= 40 or t in skip_labels:
+                        continue
+                    if t in seen_labels:
+                        continue
+                    seen_labels.add(t)
+                    el = {"type": "button", "label": t, "text": t}
+                    if btn.get("rowIndex", 0) > 0:
+                        el["row"] = btn["rowIndex"]
+                        el["rowLabel"] = btn.get("rowLabel", "")
+                    elements.append(el)
                 for inp in dom.get("inputs", []):
                     label = inp.get("label") or inp.get("placeholder") or inp.get("name") or ""
-                    if label:
+                    if label and label not in seen_labels:
+                        seen_labels.add(label)
                         elements.append({"type": "input", "label": label, "text": f"{inp.get('tag','input')}: {label}"})
-                for th in dom.get("tables", []):
-                    elements.append({"type": "column", "label": th, "text": f"column: {th}"})
+                for th in dom.get("tableHeaders", []):
+                    if th and th not in seen_labels:
+                        seen_labels.add(th)
+                        elements.append({"type": "column", "label": th, "text": f"column: {th}"})
 
                 title = dom.get("title", "")
                 print(f"✓ Found {len(elements)} elements (title={title})")
