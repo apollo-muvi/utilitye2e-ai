@@ -23,10 +23,12 @@ class FieldSpec:
 
 @dataclass
 class TestStep:
-    button: str = ""       # Button text to click
-    desc: str = ""         # Human-readable description
+    button: str = ""  # Button text to click
+    desc: str = ""  # Human-readable description
     fill_fields: List[FieldSpec] = field(default_factory=list)
-    row: int = 0           # Row index (1-based) for repeated buttons in table rows; 0 = first match
+    row: int = (
+        0  # Row index (1-based) for repeated buttons in table rows; 0 = first match
+    )
 
     def validate(self) -> List[str]:
         errs = []
@@ -69,12 +71,24 @@ class TestSpec:
         return json.dumps(self.to_dict(), indent=indent, ensure_ascii=False)
 
     @classmethod
+    def from_file(cls, path: str) -> "TestSpec":
+        with open(path, "r", encoding="utf-8") as f:
+            return cls.from_dict(json.load(f))
+
+    @classmethod
     def from_dict(cls, d: dict) -> "TestSpec":
         target = TargetSpec(**d.get("target", {}))
         fields_ = [FieldSpec(**f) for f in d.get("fields", [])]
         steps_raw = d.get("steps", [])
         steps = []
-        for s in steps_raw:
+        for step_data in steps_raw:
+            s = dict(step_data)
             fill = [FieldSpec(**f) for f in s.pop("fill_fields", [])]
             steps.append(TestStep(**s, fill_fields=fill))
-        return cls(name=d["name"], target=target, table=d.get("table",""), steps=steps, fields=fields_)
+        return cls(
+            name=d["name"],
+            target=target,
+            table=d.get("table", ""),
+            steps=steps,
+            fields=fields_,
+        )
