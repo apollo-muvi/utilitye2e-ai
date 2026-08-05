@@ -11,19 +11,15 @@ Usage:
 
 import sys
 import os
-import asyncio
 import argparse
-import json
 
 # Ensure project root is on path when running from source
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from application.workflows import analyze_test_spec, build_analyzer, run_test_spec
 from config import load_config
 from adapters.schema import create_schema_adapter
-from adapters.llm import create_llm_adapter
-from ai.analyzer import Analyzer
 from core.spec import TestSpec
-from core.runner import Runner
 
 
 def cmd_tables(args, config):
@@ -40,26 +36,27 @@ def cmd_columns(args, config):
     print(f"Table: {args.table} ({len(cols)} columns)\n")
     for c in cols:
         flags = []
-        if c.is_pk: flags.append("PK")
-        if not c.nullable: flags.append("NOT NULL")
+        if c.is_pk:
+            flags.append("PK")
+        if not c.nullable:
+            flags.append("NOT NULL")
         flag_str = f" [{', '.join(flags)}]" if flags else ""
         print(f"  {c.name:30s} {c.data_type:20s}{flag_str}")
 
 
 def cmd_analyze(args, config):
-    schema = create_schema_adapter(config["schema"])
-    llm = create_llm_adapter(config["llm"])
-    analyzer = Analyzer(llm, schema)
-
+    analyzer = build_analyzer(config)
     print(f"Generating spec for: {args.description}")
-    print(f"LLM: {llm.name}\n")
+    print(f"LLM: {analyzer.llm.name}\n")
 
-    spec = analyzer.generate(
+    spec = analyze_test_spec(
+        config=config,
         description=args.description,
         target_url=args.url,
         login_url=args.login_url,
         username=args.username,
         password=args.password,
+        analyzer=analyzer,
     )
 
     output = args.output or f"spec_{args.table}.json"
@@ -74,14 +71,16 @@ def cmd_run(args, config):
     print(f"Running: {spec.name}")
     print(f"Steps: {len(spec.steps)}\n")
 
-    runner = Runner(spec, headless=not args.headed)
-    summary = asyncio.run(runner.run())
+    result = run_test_spec(spec, headed=args.headed)
+    summary = result.summary
 
     print(f"\n{'='*50}")
-    print(f"Results: {summary['passed']} passed, {summary['failed']} failed, {summary['skipped']} skipped")
+    print(
+        f"Results: {summary['passed']} passed, {summary['failed']} failed, {summary['skipped']} skipped"
+    )
     print(f"{'='*50}")
 
-    for r in runner.recorder.results:
+    for r in result.results:
         status_icon = {"pass": "✓", "fail": "✗", "skip": "−"}[r.status]
         print(f"  {status_icon} {r.name}: {r.detail}")
 
@@ -90,6 +89,7 @@ def cmd_run(args, config):
 
 def cmd_web(args, config):
     from web.app import create_app
+
     app = create_app(config)
     app.run(
         host=config["web"]["host"],

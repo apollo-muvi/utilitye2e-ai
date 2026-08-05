@@ -4,6 +4,7 @@ import os
 from typing import Optional
 
 from .base import LLMAdapter
+from .glm import GlmAdapter
 from .hermes import HermesAdapter
 from .openai import OpenAIAdapter
 from .openrouter import OpenRouterAdapter

@@ -11,10 +11,13 @@ import hashlib
 
 from playwright.async_api import async_playwright, Page
 
+from core.auth import login_page
 from core.spec import TestSpec, TestStep
 from core.recorder import Recorder
 
-_BROWSER_PATH = os.path.expanduser("~/.cache/ms-playwright/chromium_headless_shell-1228/chrome-linux/headless_shell")
+_BROWSER_PATH = os.path.expanduser(
+    "~/.cache/ms-playwright/chromium_headless_shell-1228/chrome-linux/headless_shell"
+)
 
 
 class Runner:
@@ -30,8 +33,11 @@ class Runner:
             browser = await p.chromium.launch(
                 headless=self.headless,
                 args=["--no-sandbox", "--disable-blink-features=AutomationControlled"],
-                executable_path=_BROWSER_PATH)
-            ctx = await browser.new_context(viewport={"width": 1920, "height": 1080}, locale="zh-TW")
+                executable_path=_BROWSER_PATH,
+            )
+            ctx = await browser.new_context(
+                viewport={"width": 1920, "height": 1080}, locale="zh-TW"
+            )
             page = await ctx.new_page()
             page.set_default_timeout(15000)
             page.on("dialog", lambda d: asyncio.ensure_future(d.accept()))
@@ -56,14 +62,8 @@ class Runner:
         return self.recorder.summary()
 
     async def _login(self, page: Page):
-        """Delegate to page_crawler._try_login for robust multi-step SaaS login."""
-        t = self.spec.target
-        if not t.login_url or not t.username:
-            return
-        url = t.login_url if t.login_url.startswith("http") else f"{t.url.rstrip('/')}/{t.login_url.lstrip('/')}"
-        print(f"  → Login: {url}")
-        from ai.page_crawler import _try_login
-        await _try_login(page, url, t.username, t.password)
+        """Authenticate through the shared browser auth boundary."""
+        await login_page(page, self.spec.target)
 
     # ─── DOM snapshot ───
     async def _snapshot(self, page: Page) -> str:
@@ -146,15 +146,22 @@ class Runner:
             # 6. Report
             if changed or (before != after_final):
                 import json
+
                 snap = after_final if changed else after
                 b, a = json.loads(before), json.loads(snap)
                 d_el = a["count"] - b["count"]
                 d_in = a["inputs"] - b["inputs"]
                 parts = []
-                if d_el: parts.append(f"DOM {b['count']}→{a['count']} ({'+' if d_el>0 else ''}{d_el})")
-                if d_in: parts.append(f"inputs {b['inputs']}→{a['inputs']}")
-                if url_before != page.url: parts.append(f"URL→{page.url}")
-                if not parts: parts.append("按鈕文字變化")
+                if d_el:
+                    parts.append(
+                        f"DOM {b['count']}→{a['count']} ({'+' if d_el>0 else ''}{d_el})"
+                    )
+                if d_in:
+                    parts.append(f"inputs {b['inputs']}→{a['inputs']}")
+                if url_before != page.url:
+                    parts.append(f"URL→{page.url}")
+                if not parts:
+                    parts.append("按鈕文字變化")
                 self.recorder.pass_(label, f"✓ {', '.join(parts)}")
             else:
                 self.recorder.fail(label, "DOM 無變化，按鈕可能無效")
@@ -197,7 +204,9 @@ class Runner:
         Only fills if a form is open (has visible text inputs)."""
         try:
             # Only fill if there are visible text inputs (form is open)
-            text_inputs = await page.query_selector_all('input:not([type]), input[type="text"], input[type="email"], input[type="tel"], textarea')
+            text_inputs = await page.query_selector_all(
+                'input:not([type]), input[type="text"], input[type="email"], input[type="tel"], textarea'
+            )
             has_visible_text = False
             for el in text_inputs:
                 try:
@@ -248,10 +257,13 @@ class Runner:
             pass
 
     # ─── Confirm retry: click newly visible button if DOM unchanged ───
-    async def _try_confirm_retry(self, page: Page, before_snap: str, step: TestStep) -> bool:
+    async def _try_confirm_retry(
+        self, page: Page, before_snap: str, step: TestStep
+    ) -> bool:
         """If click didn't change DOM, maybe a confirm dialog appeared.
         Try clicking any newly visible button that looks like confirm/delete."""
         import json
+
         try:
             b = json.loads(before_snap)
             b_texts = set(b.get("btns", "").split("|"))
@@ -311,7 +323,7 @@ class Runner:
             if text in bt and await btn.is_visible():
                 return btn
         # 4. keyword
-        cn = re.findall(r'[\u4e00-\u9fff]+', text)
+        cn = re.findall(r"[\u4e00-\u9fff]+", text)
         for btn in await page.query_selector_all("button"):
             bt = (await btn.inner_text()).strip()
             if any(k in bt for k in cn) and await btn.is_visible():
