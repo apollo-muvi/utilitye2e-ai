@@ -3,11 +3,13 @@ import pytest
 from application.workflows import (
     create_posture_finding_record,
     list_posture_finding_records,
+    promote_posture_finding_record,
     render_posture_pack,
 )
 from core.posture import (
     PosturePack,
     create_posture_finding,
+    promote_posture_finding,
     render_posture_markdown,
 )
 
@@ -222,3 +224,61 @@ def test_list_posture_finding_records_can_read_single_file(tmp_path):
 
     assert len(findings) == 1
     assert findings[0].finding == "Single file finding."
+
+
+def test_promote_posture_finding_uses_suggested_assertion():
+    finding = create_posture_finding(
+        pack=PosturePack.from_dict(_pack_dict()),
+        check_id="multi-image-browse",
+        finding="Image cannot browse multiple attachments.",
+        missing_expectation="Multiple images can be browsed.",
+        suggested_assertion="Verify image viewer exposes next navigation.",
+        evidence=["image-viewer.png"],
+    )
+
+    candidate = promote_posture_finding(finding)
+
+    assert candidate.product == "ClassHub"
+    assert candidate.assertion == "Verify image viewer exposes next navigation."
+    assert candidate.source_finding == "Image cannot browse multiple attachments."
+    assert candidate.workflow_id == "parent-images"
+    assert candidate.check_id == "multi-image-browse"
+    assert candidate.expected_behavior == "Multiple images can be browsed."
+    assert candidate.evidence == ["image-viewer.png"]
+
+
+def test_promote_posture_finding_requires_automation_candidate_without_force():
+    finding = create_posture_finding(
+        pack=PosturePack.from_dict(_pack_dict()),
+        workflow_id="parent-images",
+        finding="Back path is confusing.",
+        should_be_automated=False,
+    )
+
+    with pytest.raises(ValueError, match="not marked as automation candidate"):
+        promote_posture_finding(finding)
+
+    candidate = promote_posture_finding(finding, force=True)
+
+    assert candidate.assertion == "Verify: Back path is confusing."
+
+
+def test_promote_posture_finding_record_loads_yaml_file(tmp_path):
+    finding = create_posture_finding(
+        pack=PosturePack.from_dict(_pack_dict()),
+        check_id="multi-image-browse",
+        finding="Image cannot browse multiple attachments.",
+    )
+    path = tmp_path / "finding.yaml"
+    path.write_text(finding.to_yaml(), encoding="utf-8")
+
+    candidate = promote_posture_finding_record(
+        finding_path=str(path),
+        assertion="Verify gallery navigation exists.",
+        assertion_type="ui",
+        priority="high",
+    )
+
+    assert candidate.assertion == "Verify gallery navigation exists."
+    assert candidate.priority == "high"
+    assert "source_finding: Image cannot browse" in candidate.to_yaml()
