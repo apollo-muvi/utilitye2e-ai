@@ -251,6 +251,206 @@ class PostureAssertionCandidate:
         )
 
 
+def init_posture_pack_from_dom(
+    product: str,
+    dom: Dict[str, Any],
+    url: str = "",
+) -> PosturePack:
+    """Generate a starter posture pack from crawled DOM data.
+
+    Groups navigation items into workflows and generates generic checks
+    for each (page-loads, key-elements-present).  The user is expected to
+    refine the generated pack — this just removes the blank-page problem.
+    """
+    import re
+
+    import hashlib
+
+    def _slug(text: str) -> str:
+        """Slug that handles CJK by hashing when no ascii remains."""
+        slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+        if slug:
+            return slug
+        # CJK or other non-ascii: hash for uniqueness
+        return hashlib.md5(text.encode("utf-8")).hexdigest()[:8]
+
+    def _dedupe(items: List[Dict[str, Any]], key: str) -> List[Dict[str, Any]]:
+        seen = set()
+        result = []
+        for item in items:
+            val = item.get(key, "").strip()
+            if val and val not in seen:
+                seen.add(val)
+                result.append(item)
+        return result
+
+    # --- collect candidate nav labels from multiple DOM sources ---
+    # skip obvious utility / footer / header noise
+    NOISE_LABELS = {
+        "logout", "sign out", "signout", "login", "sign in", "signin",
+        "reboot", "cancel", "ok", "apply", "save", "delete", "edit",
+        "close", "back", "next", "previous", "submit", "reset",
+        "home", "help", "support", "faq", "feedback",
+        "manual", "utility", "product registration",
+        "english", "繁體中文", "简体中文", "日本語",
+        "on", "off", "go", "yes", "no",
+        # action buttons commonly mistaken for navigation
+        "新增", "建立", "刪除", "修改", "編輯", "儲存", "取消",
+        "確認", "送出", "載入", "匯出", "匯入", "搜尋",
+        "發布", "publish", "create", "update", "remove",
+        "建立家長並產生邀請碼", "重新產生邀請碼",
+        "邀請班級內全部家長", "匯出文字備份", "刪除選取",
+        "顯示密碼", "choose files", "no file chosen",
+    }
+
+    def _is_noise(text: str) -> bool:
+        low = text.lower().strip()
+        if low in NOISE_LABELS:
+            return True
+        # pure version numbers like "9.0.0.4.386_9794"
+        if re.match(r"^[\d._]+$", low):
+            return True
+        return False
+
+    nav_labels: List[str] = []
+    for source_key in ("navItems", "links"):
+        for item in dom.get(source_key, []):
+            if isinstance(item, dict):
+                text = item.get("text", "").strip()
+            else:
+                text = str(item).strip()
+            if text and 2 <= len(text) <= 40 and not _is_noise(text):
+                nav_labels.append(text)
+
+    # fall back to buttons if no nav items found
+    if not nav_labels:
+        for btn in dom.get("buttons", []):
+            text = btn.get("text", "").strip() if isinstance(btn, dict) else ""
+            if text and 2 <= len(text) <= 30 and not _is_noise(text):
+                nav_labels.append(text)
+
+    # dedupe preserving order
+    seen_labels = set()
+    unique_labels = []
+    for label in nav_labels:
+        key = label.lower()
+        if key not in seen_labels:
+            seen_labels.add(key)
+            unique_labels.append(label)
+
+    # --- build workflows ---
+    workflows: List[PostureWorkflow] = []
+    if unique_labels:
+        for label in unique_labels[:20]:  # cap at 20 to keep pack manageable
+            slug = _slug(label)
+            workflow = PostureWorkflow(
+                id=f"{slug}",
+                title=label,
+                role="User",
+                entry_point=f"{label} menu item",
+                checks=[
+                    PostureCheck(
+                        id=f"{slug}-page-loads",
+                        text=f'"{label}" page loads without error',
+                        category="navigation",
+                    ),
+                    PostureCheck(
+                        id=f"{slug}-content-visible",
+                        text=f'"{label}" page shows expected content',
+                        category="status",
+                    ),
+                ],
+            )
+            workflows.append(workflow)
+    else:
+        # no navigation discovered — create a single generic workflow
+        workflows.append(
+            PostureWorkflow(
+                id="page-overview",
+                title="Page Overview",
+                role="User",
+                entry_point=url or "Target URL",
+                checks=[
+                    PostureCheck(
+                        id="page-loads",
+                        text="Page loads without error",
+                        category="navigation",
+                    ),
+                    PostureCheck(
+                        id="key-elements-present",
+                        text="Key interactive elements are present and visible",
+                        category="status",
+                    ),
+                ],
+            )
+        )
+
+    # --- add a form-checks workflow if inputs/buttons exist ---
+    inputs = _dedupe(dom.get("inputs", []), "label")
+    buttons = _dedupe(dom.get("buttons", []), "text")
+    if inputs or buttons:
+        form_checks: List[PostureCheck] = []
+        for inp in inputs[:8]:
+            label = inp.get("label") or inp.get("placeholder") or inp.get("name") or ""
+            if label:
+                slug = _slug(label)
+                form_checks.append(
+                    PostureCheck(
+                        id=f"form-{slug}-editable",
+                        text=f'"{label}" field is editable and accepts input',
+                        category="form",
+                    )
+                )
+        for btn in buttons[:6]:
+            text = btn.get("text", "").strip() if isinstance(btn, dict) else ""
+            if text:
+                slug = _slug(text)
+                form_checks.append(
+                    PostureCheck(
+                        id=f"btn-{slug}-works",
+                        text=f'"{text}" button responds when clicked',
+                        category="form",
+                        automation_candidate=True,
+                    )
+                )
+        if form_checks:
+            workflows.append(
+                PostureWorkflow(
+                    id="forms-and-buttons",
+                    title="Forms and Buttons",
+                    role="User",
+                    entry_point="Any page with form fields or action buttons",
+                    checks=form_checks,
+                )
+            )
+
+    return PosturePack(
+        product=product,
+        version="auto-generated",
+        purpose=f"Auto-generated posture review pack for {product}. "
+        "Refine workflows and checks before use.",
+        roles=["User"],
+        workflows=workflows,
+        invariants=[
+            PostureInvariant(
+                id="navigation-back-path",
+                text="Back path sanity",
+                question="After navigating to a page, can the user return without confusion?",
+            ),
+            PostureInvariant(
+                id="error-recovery",
+                text="Error recovery",
+                question="Do error states offer a recoverable action?",
+            ),
+        ],
+        release_gate=[
+            "All navigation items open without error.",
+            "Forms accept input and submit/save works.",
+            "No broken or empty pages.",
+        ],
+    )
+
+
 def create_posture_finding(
     pack: PosturePack,
     finding: str,

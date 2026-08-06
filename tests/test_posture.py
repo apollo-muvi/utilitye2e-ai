@@ -9,6 +9,7 @@ from application.workflows import (
 from core.posture import (
     PosturePack,
     create_posture_finding,
+    init_posture_pack_from_dom,
     promote_posture_finding,
     render_posture_markdown,
 )
@@ -282,3 +283,52 @@ def test_promote_posture_finding_record_loads_yaml_file(tmp_path):
     assert candidate.assertion == "Verify gallery navigation exists."
     assert candidate.priority == "high"
     assert "source_finding: Image cannot browse" in candidate.to_yaml()
+
+
+def test_init_posture_pack_from_nav_dom():
+    """init should create workflows from navItems and links."""
+    dom = {
+        "navItems": [{"text": "Dashboard"}, {"text": "Settings"}],
+        "links": [{"text": "Dashboard"}, {"text": "Profile"}],
+        "buttons": [{"text": "Save"}],
+        "inputs": [{"label": "Username"}, {"label": "Password"}],
+    }
+    pack = init_posture_pack_from_dom(product="TestApp", dom=dom, url="http://x")
+    assert pack.product == "TestApp"
+    # Dashboard deduped across navItems + links, so: Dashboard, Settings, Profile
+    titles = [w.title for w in pack.workflows if w.id != "forms-and-buttons"]
+    assert "Dashboard" in titles
+    assert "Settings" in titles
+    assert "Profile" in titles
+    # form workflow should exist
+    form_wf = [w for w in pack.workflows if w.id == "forms-and-buttons"]
+    assert len(form_wf) == 1
+    form_checks = form_wf[0].checks
+    assert any("Username" in c.text for c in form_checks)
+    assert any("Save" in c.text for c in form_checks)
+    errors = pack.validate()
+    assert errors == []
+
+
+def test_init_posture_pack_empty_dom():
+    """init with empty DOM should still produce a valid generic pack."""
+    pack = init_posture_pack_from_dom(product="EmptyApp", dom={}, url="http://x")
+    assert pack.product == "EmptyApp"
+    assert len(pack.workflows) >= 1
+    errors = pack.validate()
+    assert errors == []
+
+
+def test_init_posture_pack_cjk_unique_ids():
+    """CJK nav labels should produce unique hashed IDs, not all 'item'."""
+    dom = {
+        "navItems": [
+            {"text": "教師"}, {"text": "家長"}, {"text": "管理"},
+        ],
+    }
+    pack = init_posture_pack_from_dom(product="CJKApp", dom=dom, url="http://x")
+    ids = [w.id for w in pack.workflows if w.id != "forms-and-buttons"]
+    assert len(ids) == len(set(ids)), f"duplicate IDs: {ids}"
+    assert all(w.id != "item" for w in pack.workflows), "fallback 'item' slug leaked"
+    errors = pack.validate()
+    assert errors == []

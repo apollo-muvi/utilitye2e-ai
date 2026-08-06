@@ -13,6 +13,7 @@ from core.posture import (
     PostureFinding,
     PosturePack,
     create_posture_finding,
+    init_posture_pack_from_dom,
     promote_posture_finding,
     render_posture_markdown,
 )
@@ -180,6 +181,27 @@ def render_posture_pack(pack_path: str) -> str:
     if errors:
         raise ValueError("; ".join(errors))
     return render_posture_markdown(pack)
+
+
+def init_posture_pack(
+    product: str,
+    url: str,
+    login_url: str = "",
+    username: str = "",
+    password: str = "",
+) -> PosturePack:
+    """Crawl a URL and auto-generate a starter posture pack."""
+    result = discover_page(
+        target_url=url,
+        login_url=login_url,
+        username=username,
+        password=password,
+    )
+    return init_posture_pack_from_dom(
+        product=product,
+        dom=result.dom,
+        url=url,
+    )
 
 
 def create_posture_finding_record(
