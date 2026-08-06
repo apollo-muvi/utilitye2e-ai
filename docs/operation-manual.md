@@ -70,38 +70,46 @@ python cli.py run -s spec.json --headed
 
 **注意：手動走查只能在 CLI 用，Web UI 沒有這功能。**
 
-### 完整流程（4 步）
+### 完整流程（5 步）
 
 ```bash
-# ① 產生檢查清單（Markdown 勾選表）
+# ① 從網址自動產生走查清單草稿
+python cli.py posture init \
+  --url "http://localhost:3001" \
+  --product "我的產品" \
+  --username admin --password admin \
+  -o /tmp/my-pack.yaml
+
+# ② 產生檢查清單（Markdown 勾選表）
 python cli.py posture render \
-  -p examples/classhub_posture_pack.yaml \
+  -p /tmp/my-pack.yaml \
   -o /tmp/worksheet.md
 
-# ② 拿清單去實際操作產品，發現問題就記錄
+# ③ 拿清單去實際操作產品，發現問題就記錄
 python cli.py posture finding create \
-  -p examples/classhub_posture_pack.yaml \
+  -p /tmp/my-pack.yaml \
   --check-id parent-image-multiple-browse \
   --finding "圖片可放大但不能切換下一張" \
   --impact "家長看不了所有附件" \
   --automation-candidate \
   -o /tmp/findings/image.yaml
 
-# ③ 列出所有記錄的問題
+# ④ 列出所有記錄的問題
 python cli.py posture finding list -p /tmp/findings
 
-# ④ 把問題轉成自動測試用的斷言
+# ⑤ 把問題轉成自動測試用的斷言
 python cli.py posture finding promote \
   -f /tmp/findings/image.yaml \
   --priority high \
   -o /tmp/findings/image-assertion.yaml
 ```
 
-### posture 四個命令對照
+### posture 五個命令對照
 
 | 命令 | 白話解釋 |
 |------|----------|
-| `render` | 產生一份人工檢查清單 |
+| `init` | 給網址，自動產生一份走查清單草稿 |
+| `render` | 把清單變成人工檢查表 |
 | `finding create` | 記錄你走查時發現的問題 |
 | `finding list` | 列出所有已記錄的問題 |
 | `finding promote` | 把問題升級成自動測試的斷言規格 |
@@ -110,46 +118,30 @@ python cli.py posture finding promote \
 
 ## 為自己的產品建立走查清單
 
-內建只有 ClassHub 範例。你可以複製格式改自己的：
-
-```yaml
-# examples/my-product-pack.yaml
-product: 我的產品
-version: "2026-08-06"
-purpose: 手動走查清單
-
-roles:
-  - 使用者
-  - 管理員
-
-workflows:
-  - id: user-login
-    title: 使用者登入
-    role: 使用者
-    entry_point: 登入頁
-    checks:
-      - id: login-redirect
-        text: 登入成功後跳到正確頁面
-        category: navigation
-      - id: login-error
-        text: 帳號錯誤時顯示清楚訊息
-        category: recoverability
-        automation_candidate: true
-
-invariants:
-  - id: session-keep
-    text: 登入狀態保持
-    question: 重新整理後還是登入狀態嗎？
-
-release_gate:
-  - 登入流程手動檢查通過
-```
-
-然後用同一套命令操作：
+不用手寫 YAML。給工具一個網址，它會爬頁面、自動產生草稿：
 
 ```bash
-python cli.py posture render -p examples/my-product-pack.yaml
-python cli.py posture finding create -p examples/my-product-pack.yaml ...
+python cli.py posture init \
+  --url "http://localhost:3001" \
+  --product "我的產品" \
+  --username admin --password admin \
+  -o /tmp/my-product-pack.yaml
+```
+
+產出來的草稿長這樣：
+
+- **導覽項目**（從選單、連結爬到的）→ 每個自動生一組檢查
+- **REVIEW 區**（爬到的按鈕，工具分不清是導覽還是動作）→ 你來決定保留或刪除
+- **表單欄位** → 自動生「欄位可輸入」的檢查
+- **通用檢查** → 頁面載入、返回路徑、錯誤恢復
+
+**你要做的事**：打開產出的 YAML，把 REVIEW 區的項目分類——會換頁的留著、按了就執行動作的（新增/刪除/儲存）刪掉。然後加上你自己才知道的業務邏輯檢查（例如「通知日期和聯絡簿日期一致嗎？」）。
+
+改完之後用同一套命令操作：
+
+```bash
+python cli.py posture render -p /tmp/my-product-pack.yaml
+python cli.py posture finding create -p /tmp/my-product-pack.yaml ...
 ```
 
 ---
@@ -165,8 +157,9 @@ python cli.py analyze -d "描述" --url "http://..." -o spec.json
 python cli.py run -s spec.json --headed
 
 # 手動走查
-python cli.py posture render    -p examples/xxx.yaml -o worksheet.md
-python cli.py posture finding create -p examples/xxx.yaml ... -o finding.yaml
+python cli.py posture init      --url "http://..." --product "名稱" -o pack.yaml
+python cli.py posture render    -p pack.yaml -o worksheet.md
+python cli.py posture finding create -p pack.yaml ... -o finding.yaml
 python cli.py posture finding list   -p /tmp/findings
 python cli.py posture finding promote -f finding.yaml -o assertion.yaml
 ```
