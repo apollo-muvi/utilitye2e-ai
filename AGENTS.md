@@ -11,6 +11,10 @@
 - Run the relevant tests before finishing. Use `pytest -q` for normal changes.
 - If a database migration is needed, generate the migration instead of applying schema changes ad hoc.
 
+## Git Workflow Policy
+
+Never edit, commit, or push code directly on `main`. Always start from up-to-date `main`, create a feature branch from `main`, commit and push only that feature branch, open a PR, and wait for the PR to merge before treating the change as mainline.
+
 ## Architecture Boundaries
 
 - `core/` contains domain contracts and execution primitives.
