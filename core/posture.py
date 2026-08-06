@@ -268,6 +268,7 @@ def init_posture_pack_from_dom(
     """
     import hashlib
     import re
+    from urllib.parse import urljoin, urlparse
 
     def _slug(text: str) -> str:
         slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
@@ -311,7 +312,67 @@ def init_posture_pack_from_dom(
         # empty after stripping whitespace-only chars
         if len(low) < 2:
             return True
+        if re.search(r"\d+\.\d+(?:\.\d+)?", low) and re.search(
+            r"\b(branch|build|version|r\d{4,}|[a-f0-9]{8,})\b", low
+        ):
+            return True
         return False
+
+    def _is_action_or_session_label(text: str) -> bool:
+        low = text.lower().strip()
+        action_words = {
+            "logout",
+            "log out",
+            "sign out",
+            "reboot",
+            "restart",
+            "delete",
+            "remove",
+            "disconnect",
+            "reset",
+            "submit",
+            "save",
+            "apply",
+            "cancel",
+            "close",
+            "登出",
+            "重啟",
+            "重新啟動",
+            "刪除",
+            "移除",
+            "儲存",
+            "套用",
+            "取消",
+            "關閉",
+        }
+        return low in action_words
+
+    def _is_internal_navigation_href(href: str) -> bool:
+        href = href.strip()
+        if not href or href.startswith("#"):
+            return False
+        parsed_href = urlparse(href)
+        if parsed_href.scheme and parsed_href.scheme not in {"http", "https"}:
+            return False
+        if not url:
+            return True
+        parsed_base = urlparse(url)
+        absolute = urlparse(urljoin(url, href))
+        if absolute.netloc and parsed_base.netloc:
+            return absolute.netloc == parsed_base.netloc
+        return True
+
+    def _path_context_label(label: str, href: str) -> str:
+        parsed = urlparse(urljoin(url or "http://local/", href))
+        parts = [part for part in parsed.path.split("/") if part]
+        if "admin" in parts:
+            parts = parts[parts.index("admin") + 1 :]
+        if len(parts) < 2:
+            return label
+        parent = parts[-2].replace("-", " ").replace("_", " ").title()
+        if parent and parent.lower() not in label.lower():
+            return f"{parent} / {label}"
+        return label
 
     def _dedupe(items: List[Any], key: str) -> List[Dict[str, Any]]:
         seen = set()
@@ -350,26 +411,59 @@ def init_posture_pack_from_dom(
     # ── classify by source confidence ──
     workflows: List[PostureWorkflow] = []
 
-    # Tier 1: navItems (high confidence — crawled from semantic nav containers)
-    nav_labels: List[str] = []
-    for item in _dedupe(dom.get("navItems", []), "text"):
-        text = _clean_label(item.get("text", ""))
-        if text and 2 <= len(text) <= 40 and not _is_obvious_noise(text):
-            nav_labels.append(text)
-
-    # Tier 2: links (medium confidence — may include footer/header links)
+    # Tier 1: internal links with real hrefs. These are most useful on admin UIs
+    # where menu markup may concatenate section names and child labels.
     link_labels: List[str] = []
-    for item in _dedupe(dom.get("links", []), "text"):
+    link_candidates = []
+    seen_link_keys = set()
+    for item in dom.get("links", []):
+        if not isinstance(item, dict):
+            continue
         text = _clean_label(item.get("text", ""))
-        if text and 2 <= len(text) <= 40 and not _is_obvious_noise(text):
-            # skip if already captured as navItem
-            if text.lower() not in {l.lower() for l in nav_labels}:
-                link_labels.append(text)
+        href = item.get("href", "")
+        if not (text and 2 <= len(text) <= 60):
+            continue
+        if (
+            _is_obvious_noise(text)
+            or _is_action_or_session_label(text)
+            or not _is_internal_navigation_href(href)
+        ):
+            continue
+        key = (text.lower(), urlparse(urljoin(url or "http://local/", href)).path)
+        if key in seen_link_keys:
+            continue
+        seen_link_keys.add(key)
+        link_candidates.append({"text": text, "href": href})
 
-    # create workflows from high/medium-confidence sources
-    for label in nav_labels[:15]:
-        workflows.append(_make_nav_workflow(label))
-    for label in link_labels[:10]:
+    duplicate_link_texts = {}
+    for item in link_candidates:
+        key = item["text"].lower()
+        duplicate_link_texts[key] = duplicate_link_texts.get(key, 0) + 1
+    for item in link_candidates:
+        text = item["text"]
+        label = (
+            _path_context_label(text, item["href"])
+            if duplicate_link_texts[text.lower()] > 1
+            else text
+        )
+        if label.lower() not in {existing.lower() for existing in link_labels}:
+            link_labels.append(label)
+
+    # Tier 2: navItems are a fallback for pages without usable links.
+    nav_labels: List[str] = []
+    if not link_labels:
+        for item in _dedupe(dom.get("navItems", []), "text"):
+            text = _clean_label(item.get("text", ""))
+            if (
+                text
+                and 2 <= len(text) <= 40
+                and not _is_obvious_noise(text)
+                and not _is_action_or_session_label(text)
+            ):
+                nav_labels.append(text)
+
+    # create workflows from high-confidence sources
+    for label in (link_labels or nav_labels)[:25]:
         workflows.append(_make_nav_workflow(label))
 
     # Tier 3: buttons (low confidence — could be nav OR action buttons)
@@ -378,7 +472,9 @@ def init_posture_pack_from_dom(
     for item in _dedupe(dom.get("buttons", []), "text"):
         text = _clean_label(item.get("text", ""))
         if text and 2 <= len(text) <= 40 and not _is_obvious_noise(text):
-            if text.lower() not in {l.lower() for l in nav_labels + link_labels}:
+            if text.lower() not in {
+                l.lower() for l in nav_labels + link_labels
+            } and not _is_action_or_session_label(text):
                 button_labels.append(text)
 
     if button_labels:
@@ -386,7 +482,7 @@ def init_posture_pack_from_dom(
             PostureCheck(
                 id=_unique_id(f"review-btn-{_slug(t)}"),
                 text=f'"{t}" — Is this navigation or an action button? '
-                     f"Keep if it leads to a page; remove if it performs an action.",
+                f"Keep if it leads to a page; remove if it performs an action.",
                 category="review",
             )
             for t in button_labels[:15]
@@ -397,7 +493,7 @@ def init_posture_pack_from_dom(
                 title="REVIEW: Buttons (triage needed)",
                 role="User",
                 entry_point="These buttons were found but could be navigation OR actions. "
-                            "Decide for each: keep as a workflow, or delete.",
+                "Decide for each: keep as a workflow, or delete.",
                 checks=review_checks,
             )
         )

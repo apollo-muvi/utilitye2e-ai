@@ -290,22 +290,25 @@ def test_init_posture_pack_from_nav_dom():
     """init should create workflows from navItems and links, buttons go to REVIEW."""
     dom = {
         "navItems": [{"text": "Dashboard"}, {"text": "Settings"}],
-        "links": [{"text": "Dashboard"}, {"text": "Profile"}],
-        "buttons": [{"text": "Save"}],
+        "links": [
+            {"text": "Dashboard", "href": "/dashboard"},
+            {"text": "Profile", "href": "/profile"},
+        ],
+        "buttons": [{"text": "Reports"}],
         "inputs": [{"label": "Username"}, {"label": "Password"}],
     }
     pack = init_posture_pack_from_dom(product="TestApp", dom=dom, url="http://x")
     assert pack.product == "TestApp"
     titles = [w.title for w in pack.workflows]
-    # navItems become workflows
+    # internal links become workflows when hrefs are available
     assert "Dashboard" in titles
-    assert "Settings" in titles
-    # links deduped against navItems, new ones become workflows
     assert "Profile" in titles
+    # navItems are fallback only when real internal links are not available
+    assert "Settings" not in titles
     # buttons go to REVIEW, not their own workflows
     review_wf = [w for w in pack.workflows if w.id == "review-buttons"]
     assert len(review_wf) == 1
-    assert any("Save" in c.text for c in review_wf[0].checks)
+    assert any("Reports" in c.text for c in review_wf[0].checks)
     # form inputs become their own workflow
     form_wf = [w for w in pack.workflows if w.id == "forms-and-inputs"]
     assert len(form_wf) == 1
@@ -327,7 +330,9 @@ def test_init_posture_pack_cjk_unique_ids():
     """CJK nav labels should produce unique hashed IDs."""
     dom = {
         "navItems": [
-            {"text": "教師"}, {"text": "家長"}, {"text": "管理"},
+            {"text": "教師"},
+            {"text": "家長"},
+            {"text": "管理"},
         ],
     }
     pack = init_posture_pack_from_dom(product="CJKApp", dom=dom, url="http://x")
@@ -339,25 +344,57 @@ def test_init_posture_pack_cjk_unique_ids():
 
 
 def test_init_posture_pack_no_hardcoded_noise():
-    """init must NOT filter by hardcoded labels — version numbers only."""
+    """init should filter generic session/actions and structural version noise."""
     dom = {
         "navItems": [
-            {"text": "Logout"}, {"text": "9.0.0.4.386_9794"},
+            {"text": "Logout"},
+            {"text": "9.0.0.4.386_9794"},
             {"text": "Dashboard"},
         ],
         "buttons": [{"text": "Save"}, {"text": "Delete"}],
     }
     pack = init_posture_pack_from_dom(product="NoHardcode", dom=dom, url="http://x")
     nav_titles = [w.title for w in pack.workflows if w.id != "review-buttons"]
-    # Logout is a valid navItem source — must NOT be hardcoded-filtered
-    assert "Logout" in nav_titles, "Logout was hardcoded-filtered (shouldn't be)"
-    # pure version numbers ARE filtered (structural noise)
+    # session/action labels are not useful starter workflows
+    assert "Logout" not in nav_titles
+    # pure version numbers are structural noise
     assert "9.0.0.4.386_9794" not in nav_titles
+    assert "Dashboard" in nav_titles
     # buttons go to REVIEW regardless of their text
     review = [w for w in pack.workflows if "review" in w.id]
-    assert len(review) == 1
-    review_texts = " ".join(c.text for c in review[0].checks)
-    assert "Save" in review_texts
+    assert review == []
+
+
+def test_init_posture_pack_prefers_internal_links_and_filters_release_links():
+    dom = {
+        "navItems": [
+            {"text": "ServicesTerminal"},
+            {"text": "Log out"},
+        ],
+        "links": [
+            {"text": "Status", "href": "#"},
+            {"text": "Routing", "href": "/cgi-bin/luci/admin/status/routes"},
+            {"text": "Routing", "href": "/cgi-bin/luci/admin/network/routes"},
+            {"text": "Log out", "href": "/cgi-bin/luci/admin/logout"},
+            {
+                "text": "OpenWrt 24.10.5 (r29087-d9c5716d1d)",
+                "href": "https://openwrt.org/",
+            },
+        ],
+    }
+
+    pack = init_posture_pack_from_dom(
+        product="Router",
+        dom=dom,
+        url="http://router.test/cgi-bin/luci/",
+    )
+
+    titles = [w.title for w in pack.workflows]
+    assert "Status / Routing" in titles
+    assert "Network / Routing" in titles
+    assert "ServicesTerminal" not in titles
+    assert "Log out" not in titles
+    assert "OpenWrt 24.10.5 (r29087-d9c5716d1d)" not in titles
 
 
 def test_init_posture_pack_placeholder_name_inputs():
@@ -407,8 +444,11 @@ def test_init_posture_pack_thin_crawl_warning():
 
     with patch("application.workflows.discover_page") as mock_discover:
         from application.workflows import DiscoveryResult
+
         mock_discover.return_value = DiscoveryResult(
-            elements=[], title="Login", dom=thin_dom,
+            elements=[],
+            title="Login",
+            dom=thin_dom,
         )
         pack, warnings = init_posture_pack(
             product="Router",
@@ -434,8 +474,11 @@ def test_init_posture_pack_rich_crawl_no_warning():
 
     with patch("application.workflows.discover_page") as mock_discover:
         from application.workflows import DiscoveryResult
+
         mock_discover.return_value = DiscoveryResult(
-            elements=[], title="Dashboard", dom=rich_dom,
+            elements=[],
+            title="Dashboard",
+            dom=rich_dom,
         )
         pack, warnings = init_posture_pack(
             product="App",

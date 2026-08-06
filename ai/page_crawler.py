@@ -471,6 +471,44 @@ async def _try_login(page, login_url: str, username: str, password: str,
     return False
 
 
+async def _login_for_crawl(
+    page,
+    url: str,
+    login_url: str,
+    username: str,
+    password: str,
+    tenant_id: str = "",
+) -> bool:
+    """Authenticate crawler pages through the canonical auth boundary."""
+    if not username:
+        return False
+
+    from core.auth import login_page
+    from core.spec import TargetSpec
+
+    return await login_page(
+        page,
+        TargetSpec(
+            url=url,
+            login_url=login_url,
+            username=username,
+            password=password,
+        ),
+        tenant_id=tenant_id,
+    )
+
+
+def _already_at_crawl_entry_after_login(
+    logged_in: bool, login_url: str, url: str
+) -> bool:
+    """Return true when login already left the page at the crawl entry point."""
+    if not logged_in:
+        return False
+    if not login_url:
+        return True
+    return login_url.rstrip("/") == url.rstrip("/")
+
+
 async def _click_submit(frame, page) -> bool:
     """Try multiple strategies to click a submit/login button."""
     for selector in [
@@ -663,14 +701,18 @@ async def _crawl_page(url: str, login_url: str = "", username: str = "", passwor
         """)
 
         # Phase 1: Login if needed
-        logged_in = False
-        if login_url and username:
-            print(f"→ Login: {login_url}")
-            logged_in = await _try_login(page, login_url, username, password, tenant_id)
+        logged_in = await _login_for_crawl(
+            page,
+            url=url,
+            login_url=login_url,
+            username=username,
+            password=password,
+            tenant_id=tenant_id,
+        )
 
         # Phase 2: Navigate to entry URL
-        # Skip if we just logged in at the same URL — we're already on the app
-        if logged_in and login_url.rstrip('/') == url.rstrip('/'):
+        # Skip if login already entered the target page or an inline-login app.
+        if _already_at_crawl_entry_after_login(logged_in, login_url, url):
             print(f"→ Already on target page after login (url: {page.url[:60]})")
         else:
             print(f"→ Navigate: {url}")
