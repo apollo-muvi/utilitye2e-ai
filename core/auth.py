@@ -12,9 +12,19 @@ def resolve_login_url(target: TargetSpec) -> str:
     return f"{target.url.rstrip('/')}/{target.login_url.lstrip('/')}"
 
 
+def resolve_auth_entry_url(target: TargetSpec) -> str:
+    """Resolve the page where browser auth should start.
+
+    Some SPAs render login controls directly on the target URL instead of a
+    separate /login page. Keep resolve_login_url() backward compatible, and use
+    this helper only for browser-auth flows.
+    """
+    return resolve_login_url(target) or target.url
+
+
 async def login_page(page, target: TargetSpec, tenant_id: str = "") -> bool:
     """Authenticate a Playwright page using the project's canonical login flow."""
-    login_url = resolve_login_url(target)
+    login_url = resolve_auth_entry_url(target)
     if not login_url or not target.username:
         return False
 
