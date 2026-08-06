@@ -23,6 +23,8 @@ The runner uses **DOM snapshot diffing**: snapshot before click → click → sn
 - **DOM diff, not classification** — click → compare DOM before/after. Generic, works on any UI.
 - **Generic deep scan** — discover crawls every button, clicks it, fills any revealed form, submits, and collects new buttons. No hardcoded keywords.
 - **Config-free targets** — all connection info (target URL, login, credentials) entered in the Web UI, not config files.
+- **Shared workflows** — Web UI and CLI call the same application use cases for discover, analyze, and run.
+- **Single auth boundary** — browser login is routed through `core.auth` to avoid duplicated authentication flows.
 - **Config-driven locator strategies** — selector types defined in YAML, not code. Add a new selector type (e.g. `data-cy`) = add one YAML block. Zero code changes.
 - **Three-layer locator resolution** — Config strategies (fast) → AI fallback (smart) → Fuzzy text match (last resort). Maximizes element location success rate.
 
@@ -55,8 +57,13 @@ utilitye2e-ai web
 ## Architecture
 
 ```
+application/
+├── workflows.py        # Shared discover/analyze/run use cases for Web UI and CLI
+└── __init__.py         # Public workflow exports
+
 core/
 ├── spec.py             # TestSpec, TestStep (button + desc + fill_fields)
+├── auth.py             # Shared browser login boundary; resolves relative login URLs
 ├── runner.py           # DOM snapshot diff engine (click → snapshot → compare → reload)
 ├── executor.py         # Executes action plans; uses LocatorResolver (config + AI fallback)
 └── locator_resolver.py # Config-driven locator builder — dispatch table, no hardcoded if/elif
@@ -72,7 +79,7 @@ config/
 └── locator_strategies.yaml  # Single source of truth for all selector types
 
 web/
-├── app.py              # Flask API: /api/ai/discover, /analyze, /run
+├── app.py              # Thin Flask API: /api/ai/discover, /analyze, /run
 ├── templates/index.html # SPA: discover → select → analyze → run
 ├── static/js/app.js     # Step-based UI, spinner, auto-run
 └── static/css/app.css   # Styling
@@ -81,13 +88,32 @@ config.yaml        # LLM + schema adapter config (no target info)
 cli.py             # CLI entry point
 ```
 
+### Request flow
+
+```
+Web UI / CLI
+      ↓
+application.workflows
+      ↓
+ai analyzer/crawler + adapters + core runner
+      ↓
+Playwright browser execution + DOM diff report
+```
+
+The Flask routes stay thin: they read request data, call application workflows, and format JSON responses. CLI commands use the same workflow functions, so behavior stays consistent across entry points.
+
 ### Three pluggable layers
 
 | Layer | Responsibility | Built-in | Extensible to |
 |-------|---------------|----------|--------------|
+| **Application workflows** | Orchestrate discover/analyze/run | Web + CLI shared functions | API jobs, background queues |
 | **SchemaAdapter** | Read table/column info | Manual JSON | PostgreSQL, SQLite, MySQL |
 | **LLMAdapter** | Analyze DOM → TestSpec | GLM (z.ai), OpenAI, Ollama | Any provider |
 | **Runner** | Execute test via DOM diff | Playwright | Other engines |
+
+### Authentication boundary
+
+Execution paths should call `core.auth.login_page()` instead of importing crawler internals directly. This keeps SaaS login, relative login URL handling, and future browser-auth changes behind one public boundary.
 
 ## Locator strategies
 

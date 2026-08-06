@@ -23,6 +23,8 @@ Runner 採用 **DOM 快照差異比對**：點擊前快照 → 點擊 → 點擊
 - **DOM diff，非分類** — 點擊 → 比較前後 DOM。通用方案，適用任何 UI。
 - **通用深度掃描** — 探索模式爬取每個按鈕、點擊、填寫揭露的表單、提交、收集新按鈕。不寫死關鍵字。
 - **目標免設定** — 所有連線資訊（目標 URL、登入、帳密）在 Web UI 輸入，不需寫設定檔。
+- **共用 workflow** — Web UI 與 CLI 透過同一組 application use case 執行探索、分析與測試。
+- **單一 auth 邊界** — 瀏覽器登入統一經過 `core.auth`，避免重複建立認證流程。
 - **Config 驅動 locator 策略** — selector 類型定義在 YAML，不在程式碼裡。新增 selector（如 `data-cy`）= 加一段 YAML，零程式碼修改。
 - **三層 locator 解析** — Config 策略（快速）→ AI 兜底（智慧）→ 模糊文字比對（最後手段）。最大化元素定位成功率。
 
@@ -55,8 +57,13 @@ utilitye2e-ai web
 ## 架構
 
 ```
+application/
+├── workflows.py        # Web UI 與 CLI 共用的探索/分析/執行 use case
+└── __init__.py         # 公開 workflow exports
+
 core/
 ├── spec.py             # TestSpec, TestStep（按鈕 + 描述 + 填寫欄位）
+├── auth.py             # 共用瀏覽器登入邊界；解析相對 login URL
 ├── runner.py           # DOM 快照差異引擎（點擊 → 快照 → 比對 → 重新載入）
 ├── executor.py         # 執行動作計畫；使用 LocatorResolver（config + AI 兜底）
 └── locator_resolver.py # Config 驅動 locator 建構器 — dispatch table，不寫死 if/elif
@@ -72,7 +79,7 @@ config/
 └── locator_strategies.yaml  # 所有 selector 類型的唯一定義來源
 
 web/
-├── app.py              # Flask API: /api/ai/discover, /analyze, /run
+├── app.py              # 薄 Flask API: /api/ai/discover, /analyze, /run
 ├── templates/index.html # SPA: 探索 → 選取 → 分析 → 執行
 ├── static/js/app.js     # 步驟式 UI、spinner、自動執行
 └── static/css/app.css   # 樣式
@@ -81,13 +88,32 @@ config.yaml        # LLM + schema adapter 設定（不含目標資訊）
 cli.py             # CLI 入口
 ```
 
+### 請求流程
+
+```
+Web UI / CLI
+      ↓
+application.workflows
+      ↓
+ai analyzer/crawler + adapters + core runner
+      ↓
+Playwright 瀏覽器執行 + DOM diff 報告
+```
+
+Flask routes 保持薄層：讀取 request data、呼叫 application workflows、格式化 JSON response。CLI commands 使用同一組 workflow functions，因此不同入口的行為會保持一致。
+
 ### 三層可替換架構
 
 | 層級 | 職責 | 內建支援 | 可擴充至 |
 |------|------|---------|---------|
+| **Application workflows** | 協調探索/分析/執行流程 | Web + CLI 共用函式 | API jobs、背景佇列 |
 | **SchemaAdapter** | 讀取資料表/欄位資訊 | Manual JSON | PostgreSQL, SQLite, MySQL |
 | **LLMAdapter** | 分析 DOM → TestSpec | GLM (z.ai), OpenAI, Ollama | 任何供應商 |
 | **Runner** | 透過 DOM diff 執行測試 | Playwright | 其他引擎 |
+
+### 認證邊界
+
+執行路徑應呼叫 `core.auth.login_page()`，不要直接 import crawler 內部私有函式。這會把 SaaS login、相對 login URL 處理，以及未來瀏覽器認證調整集中在單一公開邊界。
 
 ## Locator 策略
 
