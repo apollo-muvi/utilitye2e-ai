@@ -23,6 +23,8 @@ The JSON structure:
     {
       "button": "string — EXACT button text from DOM",
       "desc": "string — short description of what this step tests",
+      "frame_url": "string — optional frame_url copied from selected element",
+      "frame_name": "string — optional frame_name copied from selected element",
       "fill_fields": [
         {
           "name": "string",
@@ -44,10 +46,12 @@ RULES:
 2. Use the EXACT button text — do not abbreviate or translate.
 3. Include 'fill_fields' for add/create buttons that open forms.
    Use the REAL input selectors from the DOM.
-4. Skip: navigation (首頁/登出/sidebar), utility (☰), 語言切換.
-5. Generate realistic test values: 姓名→"測試用戶", 電話→"0912345678", \
+4. If a selected element includes frame_url or frame_name, copy those values \
+to the generated step.
+5. Skip: navigation (首頁/登出/sidebar), utility (☰), 語言切換.
+6. Generate realistic test values: 姓名→"測試用戶", 電話→"0912345678", \
 email→"test@test.com".
-6. Output ONLY JSON, no markdown, no explanation.
+7. Output ONLY JSON, no markdown, no explanation.
 """
 
 USER_PROMPT_TEMPLATE = """\

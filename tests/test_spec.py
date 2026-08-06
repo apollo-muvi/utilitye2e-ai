@@ -1,6 +1,6 @@
 import json
 
-from core.spec import TestSpec
+from core.spec import TestSpec as SpecModel
 
 
 def _spec_dict():
@@ -20,7 +20,7 @@ def _spec_dict():
 def test_from_dict_does_not_mutate_input():
     data = _spec_dict()
 
-    spec = TestSpec.from_dict(data)
+    spec = SpecModel.from_dict(data)
 
     assert spec.steps[0].fill_fields[0].label == "名稱"
     assert data["steps"][0]["fill_fields"] == [
@@ -32,7 +32,7 @@ def test_from_file_loads_json_spec(tmp_path):
     path = tmp_path / "spec.json"
     path.write_text(json.dumps(_spec_dict(), ensure_ascii=False), encoding="utf-8")
 
-    spec = TestSpec.from_file(str(path))
+    spec = SpecModel.from_file(str(path))
 
     assert spec.name == "Demo"
     assert spec.target.url == "https://example.test"

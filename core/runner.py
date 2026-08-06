@@ -67,8 +67,15 @@ class Runner:
 
     # ─── DOM snapshot ───
     async def _snapshot(self, page: Page) -> str:
-        """Hash of page DOM structure — element count + visible text + table cell text."""
-        return await page.evaluate("""
+        """Hash of visible DOM structure across the page and all frames."""
+        import json
+
+        snapshots = []
+        for frame in page.frames:
+            if not frame.url or frame.url == "about:blank":
+                continue
+            try:
+                data = await frame.evaluate("""
             () => {
                 const els = document.querySelectorAll('*');
                 let count = els.length;
@@ -89,6 +96,42 @@ class Runner:
                 return JSON.stringify({count, inputs, btns: texts.sort().join('|'), cells: cellTexts.join('|')});
             }
         """)
+                snapshots.append(
+                    {
+                        "url": frame.url,
+                        "name": frame.name or "",
+                        "dom": json.loads(data),
+                    }
+                )
+            except Exception as exc:
+                snapshots.append(
+                    {
+                        "url": frame.url,
+                        "name": frame.name or "",
+                        "error": str(exc),
+                    }
+                )
+        return json.dumps(snapshots, ensure_ascii=False, sort_keys=True)
+
+    @staticmethod
+    def _summarize_snapshot(snapshot):
+        if isinstance(snapshot, dict):
+            return snapshot
+
+        summary = {"count": 0, "inputs": 0, "btns": "", "cells": ""}
+        btns = []
+        cells = []
+        for frame_snap in snapshot:
+            dom = frame_snap.get("dom", {})
+            summary["count"] += dom.get("count", 0)
+            summary["inputs"] += dom.get("inputs", 0)
+            if dom.get("btns"):
+                btns.append(dom["btns"])
+            if dom.get("cells"):
+                cells.append(dom["cells"])
+        summary["btns"] = "|".join(btns)
+        summary["cells"] = "|".join(cells)
+        return summary
 
     # ─── Run one step ───
     async def _run_step(self, page: Page, step: TestStep, label: str, step_idx: int):
@@ -102,7 +145,13 @@ class Runner:
             url_before = page.url
 
             # 2. Find + click button
-            btn = await self._find_button(page, step.button, step.row)
+            btn = await self._find_button(
+                page,
+                step.button,
+                step.row,
+                frame_url=step.frame_url,
+                frame_name=step.frame_name,
+            )
             if not btn:
                 self.recorder.fail(label, f"找不到按鈕: {step.button}")
                 return
@@ -116,7 +165,12 @@ class Runner:
 
             # 3. Fill explicit fields if any
             if step.fill_fields:
-                await self._fill_fields(page, step.fill_fields)
+                await self._fill_fields(
+                    page,
+                    step.fill_fields,
+                    frame_url=step.frame_url,
+                    frame_name=step.frame_name,
+                )
                 await page.wait_for_timeout(500)
 
             # 4. Snapshot after
@@ -148,7 +202,9 @@ class Runner:
                 import json
 
                 snap = after_final if changed else after
-                b, a = json.loads(before), json.loads(snap)
+                b, a = self._summarize_snapshot(
+                    json.loads(before)
+                ), self._summarize_snapshot(json.loads(snap))
                 d_el = a["count"] - b["count"]
                 d_in = a["inputs"] - b["inputs"]
                 parts = []
@@ -285,70 +341,109 @@ class Runner:
             pass
         return False
 
+    @staticmethod
+    def _candidate_frames(page: Page, frame_url: str = "", frame_name: str = ""):
+        frames = [
+            frame for frame in page.frames if frame.url and frame.url != "about:blank"
+        ]
+        if not frame_url and not frame_name:
+            return frames
+
+        preferred = []
+        fallback = []
+        for frame in frames:
+            url_match = frame_url and frame_url in frame.url
+            name_match = frame_name and frame_name == (frame.name or "")
+            if url_match or name_match:
+                preferred.append(frame)
+            else:
+                fallback.append(frame)
+        return preferred + fallback
+
     # ─── Find button (supports row index for repeated buttons) ───
-    async def _find_button(self, page: Page, text: str, row: int = 0):
+    async def _find_button(
+        self,
+        page: Page,
+        text: str,
+        row: int = 0,
+        frame_url: str = "",
+        frame_name: str = "",
+    ):
         if not text:
             return None
+        frames = self._candidate_frames(page, frame_url, frame_name)
+
         # If row specified, find buttons inside table rows
         if row > 0:
-            rows = await page.query_selector_all("tr")
-            # row is 1-based occurrence, not DOM index
             matched = 0
-            for tr in rows:
-                btns = await tr.query_selector_all("button")
-                for btn in btns:
-                    try:
-                        bt = (await btn.inner_text()).strip()
-                        vis = await btn.is_visible()
-                        if text in bt and vis:
-                            matched += 1
-                            if matched == row:
-                                return btn
-                    except:
-                        continue
+            for frame in frames:
+                rows = await frame.query_selector_all("tr")
+                # row is 1-based occurrence, not DOM index
+                for tr in rows:
+                    btns = await tr.query_selector_all("button")
+                    for btn in btns:
+                        try:
+                            bt = (await btn.inner_text()).strip()
+                            vis = await btn.is_visible()
+                            if text in bt and vis:
+                                matched += 1
+                                if matched == row:
+                                    return btn
+                        except:
+                            continue
             print(f"    → Row {row} button '{text}' not found (only {matched} matches)")
             return None
 
-        # 1. exact role match
-        loc = page.get_by_role("button", name=text, exact=True)
-        if await loc.count() > 0 and await loc.first.is_visible():
-            return loc.first
-        # 2. fuzzy role match
-        loc = page.get_by_role("button", name=text, exact=False)
-        if await loc.count() > 0 and await loc.first.is_visible():
-            return loc.first
-        # 3. partial text on all buttons
-        for btn in await page.query_selector_all("button"):
-            bt = (await btn.inner_text()).strip()
-            if text in bt and await btn.is_visible():
-                return btn
+        for frame in frames:
+            # 1. exact role match
+            loc = frame.get_by_role("button", name=text, exact=True)
+            if await loc.count() > 0 and await loc.first.is_visible():
+                return loc.first
+            # 2. fuzzy role match
+            loc = frame.get_by_role("button", name=text, exact=False)
+            if await loc.count() > 0 and await loc.first.is_visible():
+                return loc.first
+            # 3. partial text on all buttons
+            for btn in await frame.query_selector_all("button"):
+                bt = (await btn.inner_text()).strip()
+                if text in bt and await btn.is_visible():
+                    return btn
+
         # 4. keyword
         cn = re.findall(r"[\u4e00-\u9fff]+", text)
-        for btn in await page.query_selector_all("button"):
-            bt = (await btn.inner_text()).strip()
-            if any(k in bt for k in cn) and await btn.is_visible():
-                return btn
+        for frame in frames:
+            for btn in await frame.query_selector_all("button"):
+                bt = (await btn.inner_text()).strip()
+                if any(k in bt for k in cn) and await btn.is_visible():
+                    return btn
+
         # 5. links
-        for a in await page.query_selector_all("a"):
-            at = (await a.inner_text()).strip()
-            if text in at and await a.is_visible():
-                return a
+        for frame in frames:
+            for a in await frame.query_selector_all("a"):
+                at = (await a.inner_text()).strip()
+                if text in at and await a.is_visible():
+                    return a
         return None
 
     # ─── Fill fields ───
-    async def _fill_fields(self, page: Page, fields: list):
+    async def _fill_fields(
+        self, page: Page, fields: list, frame_url: str = "", frame_name: str = ""
+    ):
+        frames = self._candidate_frames(page, frame_url, frame_name)
         for f in fields:
             if not f.selector or not f.value:
                 continue
-            try:
-                el = page.locator(f.selector)
-                if await el.count() > 0 and await el.first.is_visible():
-                    if f.field_type == "select" and f.options:
-                        await el.first.select_option(label=f.options[0])
-                    elif f.field_type == "checkbox":
-                        await el.first.check()
-                    else:
-                        await el.first.fill(f.value)
-                    print(f"    → Fill: {f.selector} = {f.value}")
-            except:
-                pass
+            for frame in frames:
+                try:
+                    el = frame.locator(f.selector)
+                    if await el.count() > 0 and await el.first.is_visible():
+                        if f.field_type == "select" and f.options:
+                            await el.first.select_option(label=f.options[0])
+                        elif f.field_type == "checkbox":
+                            await el.first.check()
+                        else:
+                            await el.first.fill(f.value)
+                        print(f"    → Fill: {f.selector} = {f.value}")
+                        break
+                except:
+                    pass
