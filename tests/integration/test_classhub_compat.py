@@ -91,7 +91,7 @@ def test_classhub_runner_can_login_and_exercise_spa_tab():
     assert summary["passed"] >= 1
 
 
-def test_classhub_publish_flow_survives_spa_settle_waits():
+def test_classhub_parent_regression_after_publish_flow():
     url, tenant_id, password = _classhub_env()
     unique = str(int(time.time() * 1000))
 
@@ -106,6 +106,7 @@ def test_classhub_publish_flow_survives_spa_settle_waits():
             context = await browser.new_context(
                 viewport={"width": 1280, "height": 1000},
                 locale="zh-TW",
+                timezone_id="Asia/Taipei",
             )
             page = await context.new_page()
             try:
@@ -135,6 +136,9 @@ def test_classhub_publish_flow_survives_spa_settle_waits():
                 await page.get_by_text("家長已連結，邀請碼已產生").wait_for(
                     state="visible", timeout=5000
                 )
+                await page.get_by_label("家長邀請連結").wait_for(
+                    state="visible", timeout=5000
+                )
 
                 title = f"E2E聯絡簿{unique}"
                 await page.get_by_placeholder("標題").fill(title)
@@ -147,6 +151,58 @@ def test_classhub_publish_flow_survives_spa_settle_waits():
                     state="visible", timeout=5000
                 )
                 await page.get_by_text(title).wait_for(state="visible", timeout=5000)
+
+                await page.get_by_role("button", name="家長", exact=True).click()
+                await wait_for_ui_settle(page)
+                await page.get_by_role("button", name="綁定家長", exact=True).click()
+                await wait_for_ui_settle(page, timeout_ms=5000)
+                await page.get_by_text("家長存取權已啟用").wait_for(
+                    state="visible", timeout=5000
+                )
+
+                parent_feed = page.locator("section.feed-panel").filter(
+                    has=page.get_by_role("heading", name="家長聯絡簿")
+                )
+                await parent_feed.get_by_text(title).wait_for(
+                    state="visible", timeout=5000
+                )
+                notifications = page.locator("section.compact-panel").filter(
+                    has=page.get_by_role("heading", name="通知")
+                )
+                await notifications.get_by_text(title).wait_for(
+                    state="visible", timeout=5000
+                )
+
+                parent_session = await page.evaluate(
+                    """(tenantId) => JSON.parse(localStorage.getItem(`classhubParentSession:${tenantId}`))""",
+                    tenant_id,
+                )
+                assert parent_session["access_token"]
+                assert parent_session["selected_student_id"]
+                default_today = await page.evaluate(
+                    """async ({tenantId, token, studentId}) => {
+                        const settingsResponse = await fetch("/api/app-settings");
+                        if (!settingsResponse.ok) {
+                            throw new Error(`settings ${settingsResponse.status}`);
+                        }
+                        const settings = await settingsResponse.json();
+                        const params = new URLSearchParams({ student_id: studentId });
+                        const response = await fetch(
+                            `/api/${settings.api_version}/tenants/${tenantId}/parent/today?${params.toString()}`,
+                            { headers: { Authorization: `Bearer ${token}` } },
+                        );
+                        if (!response.ok) {
+                            throw new Error(`parent/today ${response.status}`);
+                        }
+                        return response.json();
+                    }""",
+                    {
+                        "tenantId": tenant_id,
+                        "token": parent_session["access_token"],
+                        "studentId": parent_session["selected_student_id"],
+                    },
+                )
+                assert any(item["title"] == title for item in default_today["items"])
             finally:
                 await browser.close()
 
