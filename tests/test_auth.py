@@ -1,4 +1,4 @@
-from core.auth import resolve_login_url
+from core.auth import resolve_auth_entry_url, resolve_login_url
 from core.spec import TargetSpec
 
 
@@ -20,3 +20,9 @@ def test_resolve_login_url_returns_empty_without_login_url():
     target = TargetSpec(url="https://example.test/app")
 
     assert resolve_login_url(target) == ""
+
+
+def test_resolve_auth_entry_url_falls_back_to_target_url_for_inline_login():
+    target = TargetSpec(url="https://example.test/app")
+
+    assert resolve_auth_entry_url(target) == "https://example.test/app"
