@@ -1,7 +1,7 @@
-"""Posture pack contract for manual unknown-risk review."""
+"""Posture pack contracts for manual unknown-risk review."""
 
 from dataclasses import asdict, dataclass, field
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 
@@ -98,6 +98,19 @@ class PosturePack:
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
 
+    def find_workflow(self, workflow_id: str) -> PostureWorkflow:
+        for workflow in self.workflows:
+            if workflow.id == workflow_id:
+                return workflow
+        raise ValueError(f"unknown workflow id: {workflow_id}")
+
+    def find_check(self, check_id: str) -> Tuple[PostureWorkflow, PostureCheck]:
+        for workflow in self.workflows:
+            for check in workflow.checks:
+                if check.id == check_id:
+                    return workflow, check
+        raise ValueError(f"unknown check id: {check_id}")
+
     @classmethod
     def from_file(cls, path: str) -> "PosturePack":
         with open(path, "r", encoding="utf-8") as f:
@@ -124,6 +137,115 @@ class PosturePack:
             release_gate=list(data.get("release_gate", [])),
             finding_template=list(data.get("finding_template", [])),
         )
+
+
+@dataclass
+class PostureFinding:
+    product: str
+    finding: str
+    workflow_id: str = ""
+    check_id: str = ""
+    check_text: str = ""
+    category: str = ""
+    user_impact: str = ""
+    missing_expectation: str = ""
+    should_be_automated: bool = False
+    suggested_assertion: str = ""
+    suggested_checklist_update: str = ""
+    evidence: List[str] = field(default_factory=list)
+    owner: str = ""
+    status: str = "open"
+
+    def validate(self) -> List[str]:
+        errors = []
+        if not self.product:
+            errors.append("product is required")
+        if not self.finding:
+            errors.append("finding is required")
+        return errors
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    def to_yaml(self) -> str:
+        return yaml.safe_dump(
+            self.to_dict(),
+            allow_unicode=True,
+            sort_keys=False,
+        )
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "PostureFinding":
+        return cls(
+            product=data.get("product", ""),
+            finding=data.get("finding", ""),
+            workflow_id=data.get("workflow_id", ""),
+            check_id=data.get("check_id", ""),
+            check_text=data.get("check_text", ""),
+            category=data.get("category", ""),
+            user_impact=data.get("user_impact", ""),
+            missing_expectation=data.get("missing_expectation", ""),
+            should_be_automated=bool(data.get("should_be_automated", False)),
+            suggested_assertion=data.get("suggested_assertion", ""),
+            suggested_checklist_update=data.get("suggested_checklist_update", ""),
+            evidence=list(data.get("evidence", [])),
+            owner=data.get("owner", ""),
+            status=data.get("status", "open"),
+        )
+
+
+def create_posture_finding(
+    pack: PosturePack,
+    finding: str,
+    workflow_id: str = "",
+    check_id: str = "",
+    user_impact: str = "",
+    missing_expectation: str = "",
+    should_be_automated: Optional[bool] = None,
+    suggested_assertion: str = "",
+    suggested_checklist_update: str = "",
+    evidence: List[str] | None = None,
+    owner: str = "",
+    status: str = "open",
+) -> PostureFinding:
+    """Create a structured finding tied to a posture pack workflow/check."""
+    check_text = ""
+    category = ""
+    inferred_automation = False
+
+    if check_id:
+        workflow, check = pack.find_check(check_id)
+        workflow_id = workflow.id
+        check_text = check.text
+        category = check.category
+        inferred_automation = check.automation_candidate
+    elif workflow_id:
+        pack.find_workflow(workflow_id)
+
+    finding_record = PostureFinding(
+        product=pack.product,
+        finding=finding,
+        workflow_id=workflow_id,
+        check_id=check_id,
+        check_text=check_text,
+        category=category,
+        user_impact=user_impact,
+        missing_expectation=missing_expectation,
+        should_be_automated=(
+            inferred_automation
+            if should_be_automated is None
+            else bool(should_be_automated)
+        ),
+        suggested_assertion=suggested_assertion,
+        suggested_checklist_update=suggested_checklist_update,
+        evidence=evidence or [],
+        owner=owner,
+        status=status,
+    )
+    errors = finding_record.validate()
+    if errors:
+        raise ValueError("; ".join(errors))
+    return finding_record
 
 
 def render_posture_markdown(pack: PosturePack) -> str:
