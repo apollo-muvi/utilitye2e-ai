@@ -790,8 +790,17 @@ def _flatten_frames(result: Dict[str, Any]) -> Dict[str, Any]:
     """
     merged = {k: [] for k in ("buttons", "inputs", "selects", "tableHeaders", "links", "navItems")}
     for frame in result.get("frames", []):
+        frame_url = frame.get("frameUrl", "")
+        frame_name = frame.get("frameName", "")
         for key in merged:
-            merged[key].extend(frame.get(key, []))
+            for item in frame.get(key, []):
+                if isinstance(item, dict):
+                    enriched = dict(item)
+                    enriched.setdefault("frameUrl", frame_url)
+                    enriched.setdefault("frameName", frame_name)
+                    merged[key].append(enriched)
+                else:
+                    merged[key].append(item)
     # Deduplicate tableHeaders and links by text/href
     seen_th = set()
     deduped_th = []

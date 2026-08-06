@@ -29,6 +29,8 @@ class TestStep:
     row: int = (
         0  # Row index (1-based) for repeated buttons in table rows; 0 = first match
     )
+    frame_url: str = ""  # Optional frame URL for iframe-based UIs
+    frame_name: str = ""  # Optional frame name for iframe-based UIs
 
     def validate(self) -> List[str]:
         errs = []

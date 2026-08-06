@@ -46,31 +46,43 @@ def build_selectable_elements(dom: Dict[str, Any]) -> List[Dict[str, Any]]:
     elements = []
     skip_labels = {"☰", "登出", "Logout", "Sign out", "取消", "儲存", "Cancel", "Save"}
     seen_labels = set()
+    seen_context_labels = set()
 
     for btn in dom.get("buttons", []):
         text = btn.get("text", "").strip()
         if not text or len(text) >= 40 or text in skip_labels:
             continue
-        if text in seen_labels:
+        seen_key = (text, btn.get("frameUrl", ""), btn.get("frameName", ""))
+        if seen_key in seen_context_labels:
             continue
+        seen_context_labels.add(seen_key)
         seen_labels.add(text)
         element = {"type": "button", "label": text, "text": text}
         if btn.get("rowIndex", 0) > 0:
             element["row"] = btn["rowIndex"]
             element["rowLabel"] = btn.get("rowLabel", "")
+        if btn.get("frameUrl"):
+            element["frame_url"] = btn["frameUrl"]
+        if btn.get("frameName"):
+            element["frame_name"] = btn["frameName"]
         elements.append(element)
 
     for inp in dom.get("inputs", []):
         label = inp.get("label") or inp.get("placeholder") or inp.get("name") or ""
-        if label and label not in seen_labels:
+        seen_key = (label, inp.get("frameUrl", ""), inp.get("frameName", ""))
+        if label and seen_key not in seen_context_labels:
+            seen_context_labels.add(seen_key)
             seen_labels.add(label)
-            elements.append(
-                {
-                    "type": "input",
-                    "label": label,
-                    "text": f"{inp.get('tag', 'input')}: {label}",
-                }
-            )
+            element = {
+                "type": "input",
+                "label": label,
+                "text": f"{inp.get('tag', 'input')}: {label}",
+            }
+            if inp.get("frameUrl"):
+                element["frame_url"] = inp["frameUrl"]
+            if inp.get("frameName"):
+                element["frame_name"] = inp["frameName"]
+            elements.append(element)
 
     for header in dom.get("tableHeaders", []):
         if header and header not in seen_labels:
