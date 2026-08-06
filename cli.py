@@ -128,7 +128,7 @@ def cmd_posture(args, config):
 
 
 def cmd_posture_init(args, config):
-    pack = init_posture_pack(
+    pack, warnings = init_posture_pack(
         product=args.product,
         url=args.url,
         login_url=args.login_url,
@@ -144,6 +144,10 @@ def cmd_posture_init(args, config):
         print(f"Posture pack saved to: {args.output}")
         print(f"  {len(pack.workflows)} workflows, "
               f"{sum(len(w.checks) for w in pack.workflows)} checks")
+        if warnings:
+            print()
+            for w in warnings:
+                print(f"  WARNING: {w}")
         return
     print(output, end="")
 
