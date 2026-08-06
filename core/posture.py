@@ -275,6 +275,28 @@ def init_posture_pack_from_dom(
             return slug
         return hashlib.md5(text.encode("utf-8")).hexdigest()[:8]
 
+    def _resolve_input_label(inp: Dict[str, Any]) -> str:
+        """Get the best available label for an input, in priority order."""
+        return (
+            inp.get("label", "").strip()
+            or inp.get("placeholder", "").strip()
+            or inp.get("name", "").strip()
+            or inp.get("id", "").strip()
+        )
+
+    # unique ID registry — ensures no collisions across workflows and checks
+    _used_ids: set = set()
+
+    def _unique_id(base: str) -> str:
+        """Return base if unused, else append -2, -3, ... until unique."""
+        candidate = base
+        n = 2
+        while candidate in _used_ids:
+            candidate = f"{base}-{n}"
+            n += 1
+        _used_ids.add(candidate)
+        return candidate
+
     def _clean_label(text: str) -> str:
         return text.strip()
 
@@ -305,7 +327,7 @@ def init_posture_pack_from_dom(
         return result
 
     def _make_nav_workflow(label: str) -> PostureWorkflow:
-        slug = _slug(label)
+        slug = _unique_id(_slug(label))
         return PostureWorkflow(
             id=slug,
             title=label,
@@ -313,12 +335,12 @@ def init_posture_pack_from_dom(
             entry_point=f"{label}",
             checks=[
                 PostureCheck(
-                    id=f"{slug}-page-loads",
+                    id=_unique_id(f"{slug}-page-loads"),
                     text=f'"{label}" loads without error',
                     category="navigation",
                 ),
                 PostureCheck(
-                    id=f"{slug}-content-visible",
+                    id=_unique_id(f"{slug}-content-visible"),
                     text=f'"{label}" shows expected content',
                     category="status",
                 ),
@@ -362,7 +384,7 @@ def init_posture_pack_from_dom(
     if button_labels:
         review_checks = [
             PostureCheck(
-                id=f"review-btn-{_slug(t)}",
+                id=_unique_id(f"review-btn-{_slug(t)}"),
                 text=f'"{t}" — Is this navigation or an action button? '
                      f"Keep if it leads to a page; remove if it performs an action.",
                 category="review",
@@ -371,7 +393,7 @@ def init_posture_pack_from_dom(
         ]
         workflows.append(
             PostureWorkflow(
-                id="review-buttons",
+                id=_unique_id("review-buttons"),
                 title="REVIEW: Buttons (triage needed)",
                 role="User",
                 entry_point="These buttons were found but could be navigation OR actions. "
@@ -380,22 +402,26 @@ def init_posture_pack_from_dom(
             )
         )
 
-    # Tier 4: form inputs
-    inputs = _dedupe(dom.get("inputs", []), "label")
+    # Tier 4: form inputs — dedupe by resolved label (label → placeholder → name → id)
+    raw_inputs = dom.get("inputs", [])
+    seen_input_labels: set = set()
+    inputs: List[Dict[str, Any]] = []
+    for inp in raw_inputs:
+        if not isinstance(inp, dict):
+            continue
+        label = _resolve_input_label(inp)
+        if label and label.lower() not in seen_input_labels:
+            seen_input_labels.add(label.lower())
+            inputs.append({**inp, "_resolved_label": label})
     if inputs:
         form_checks: List[PostureCheck] = []
         for inp in inputs[:10]:
-            label = (
-                inp.get("label")
-                or inp.get("placeholder")
-                or inp.get("name")
-                or ""
-            )
+            label = inp.get("_resolved_label", "")
             if label:
                 slug = _slug(label)
                 form_checks.append(
                     PostureCheck(
-                        id=f"form-{slug}-editable",
+                        id=_unique_id(f"form-{slug}-editable"),
                         text=f'"{label}" field is editable and accepts input',
                         category="form",
                     )
@@ -403,7 +429,7 @@ def init_posture_pack_from_dom(
         if form_checks:
             workflows.append(
                 PostureWorkflow(
-                    id="forms-and-inputs",
+                    id=_unique_id("forms-and-inputs"),
                     title="Forms and Inputs",
                     role="User",
                     entry_point="Form fields discovered on the page",
@@ -415,18 +441,18 @@ def init_posture_pack_from_dom(
     if not workflows:
         workflows.append(
             PostureWorkflow(
-                id="page-overview",
+                id=_unique_id("page-overview"),
                 title="Page Overview",
                 role="User",
                 entry_point=url or "Target URL",
                 checks=[
                     PostureCheck(
-                        id="page-loads",
+                        id=_unique_id("page-loads"),
                         text="Page loads without error",
                         category="navigation",
                     ),
                     PostureCheck(
-                        id="key-elements-present",
+                        id=_unique_id("key-elements-present"),
                         text="Key interactive elements are present and visible",
                         category="status",
                     ),

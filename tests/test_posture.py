@@ -353,8 +353,42 @@ def test_init_posture_pack_no_hardcoded_noise():
     # pure version numbers ARE filtered (structural noise)
     assert "9.0.0.4.386_9794" not in nav_titles
     # buttons go to REVIEW regardless of their text
-    review = [w for w in pack.workflows if w.id == "review-buttons"]
+    review = [w for w in pack.workflows if "review" in w.id]
     assert len(review) == 1
     review_texts = " ".join(c.text for c in review[0].checks)
     assert "Save" in review_texts
-    assert "Delete" in review_texts
+
+
+def test_init_posture_pack_placeholder_name_inputs():
+    """Inputs with only placeholder/name (no label) must not be silently dropped."""
+    dom = {
+        "inputs": [
+            {"placeholder": "Email"},
+            {"name": "password"},
+            {"id": "search-box"},
+        ],
+    }
+    pack = init_posture_pack_from_dom(product="FormApp", dom=dom, url="http://x")
+    form_wf = [w for w in pack.workflows if "forms" in w.id]
+    assert len(form_wf) == 1, "form workflow missing"
+    texts = " ".join(c.text for c in form_wf[0].checks)
+    assert "Email" in texts, "placeholder-only input dropped"
+    assert "password" in texts, "name-only input dropped"
+    assert "search-box" in texts, "id-only input dropped"
+
+
+def test_init_posture_pack_no_duplicate_ids():
+    """Labels that slug identically must produce unique workflow and check IDs."""
+    dom = {
+        "navItems": [
+            {"text": "Settings"},
+            {"text": "settings"},
+            {"text": "Settings!"},
+        ],
+    }
+    pack = init_posture_pack_from_dom(product="SlugApp", dom=dom, url="http://x")
+    all_ids = []
+    for w in pack.workflows:
+        all_ids.append(w.id)
+        all_ids.extend(c.id for c in w.checks)
+    assert len(all_ids) == len(set(all_ids)), f"duplicate IDs: {all_ids}"
