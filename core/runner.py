@@ -14,6 +14,7 @@ from playwright.async_api import async_playwright, Page
 from core.auth import login_page
 from core.spec import TestSpec, TestStep
 from core.recorder import Recorder
+from core.waiting import wait_for_ui_settle
 
 _BROWSER_PATH = os.path.expanduser(
     "~/.cache/ms-playwright/chromium_headless_shell-1228/chrome-linux/headless_shell"
@@ -46,7 +47,7 @@ class Runner:
                 await self._login(page)
                 print(f"  → Navigate: {self.spec.target.url}")
                 await page.goto(self.spec.target.url, wait_until="networkidle")
-                await page.wait_for_timeout(3000)
+                await wait_for_ui_settle(page)
 
                 for i, step in enumerate(self.spec.steps):
                     label = f"{self.spec.name} #{i+1} {step.desc or step.button}"
@@ -161,7 +162,7 @@ class Runner:
             except Exception:
                 await btn.click(force=True, timeout=5000)
             print(f"    → Clicked: {step.button}")
-            await page.wait_for_timeout(2000)
+            await wait_for_ui_settle(page)
 
             # 3. Fill explicit fields if any
             if step.fill_fields:
@@ -171,7 +172,7 @@ class Runner:
                     frame_url=step.frame_url,
                     frame_name=step.frame_name,
                 )
-                await page.wait_for_timeout(500)
+                await wait_for_ui_settle(page, timeout_ms=1500)
 
             # 4. Snapshot after
             after = await self._snapshot(page)
@@ -181,7 +182,7 @@ class Runner:
             changed = before != after
             if not changed:
                 # 5a. Wait longer for async operations (delete via confirm dialog)
-                await page.wait_for_timeout(3000)
+                await wait_for_ui_settle(page, timeout_ms=3000)
                 after = await self._snapshot(page)
                 changed = before != after
             if not changed:
@@ -189,7 +190,7 @@ class Runner:
                 #     (e.g. delete succeeded but React didn't re-render)
                 try:
                     await page.reload(wait_until="networkidle")
-                    await page.wait_for_timeout(2000)
+                    await wait_for_ui_settle(page)
                     after = await self._snapshot(page)
                     changed = before != after
                 except:
@@ -246,7 +247,7 @@ class Runner:
             if not final_changed:
                 try:
                     await page.reload(wait_until="networkidle")
-                    await page.wait_for_timeout(2000)
+                    await wait_for_ui_settle(page)
                 except:
                     pass
 
