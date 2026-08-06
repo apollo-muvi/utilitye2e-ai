@@ -56,6 +56,13 @@ utilitye2e-ai web
 
 # 產生 posture review worksheet
 utilitye2e-ai posture render --pack examples/classhub_posture_pack.yaml
+
+# 記錄人工 posture finding
+utilitye2e-ai posture finding create \
+  --pack examples/classhub_posture_pack.yaml \
+  --check-id parent-image-multiple-browse \
+  --finding "Image opens but cannot browse multiple attachments" \
+  --impact "Parent cannot inspect every image from the detail view"
 ```
 
 ## Web UI 操作流程
@@ -149,6 +156,21 @@ utilitye2e-ai posture render \
 ```
 
 內建 ClassHub example 覆蓋 parent notification → contact book、image attachments、teacher publish → parent view，以及 admin identity consistency。
+
+人工 review 的發現可以記錄成 YAML，並且綁回 workflow 或 check：
+
+```bash
+utilitye2e-ai posture finding create \
+  --pack examples/classhub_posture_pack.yaml \
+  --check-id parent-notification-date-consistency \
+  --finding "Notification date and detail date disagree" \
+  --impact "Parent cannot tell which contact-book item is current" \
+  --missing-expectation "Same record should use one effective date across notification, list, and detail" \
+  --suggested-assertion "Compare notification, list, and detail date for the same contact-book item" \
+  --automation-candidate \
+  --evidence screenshot-notification.png \
+  --output /tmp/classhub-date-finding.yaml
+```
 
 ### 認證邊界
 

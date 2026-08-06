@@ -7,7 +7,12 @@ from urllib.parse import urlparse
 
 from adapters.llm import create_llm_adapter
 from adapters.schema import create_schema_adapter
-from core.posture import PosturePack, render_posture_markdown
+from core.posture import (
+    PostureFinding,
+    PosturePack,
+    create_posture_finding,
+    render_posture_markdown,
+)
 from ai.analyzer import Analyzer
 from core.recorder import TestResult
 from core.spec import TestSpec
@@ -172,3 +177,38 @@ def render_posture_pack(pack_path: str) -> str:
     if errors:
         raise ValueError("; ".join(errors))
     return render_posture_markdown(pack)
+
+
+def create_posture_finding_record(
+    pack_path: str,
+    finding: str,
+    workflow_id: str = "",
+    check_id: str = "",
+    user_impact: str = "",
+    missing_expectation: str = "",
+    should_be_automated: Optional[bool] = None,
+    suggested_assertion: str = "",
+    suggested_checklist_update: str = "",
+    evidence: Optional[List[str]] = None,
+    owner: str = "",
+    status: str = "open",
+) -> PostureFinding:
+    """Load a posture pack and create a validated finding record."""
+    pack = PosturePack.from_file(pack_path)
+    errors = pack.validate()
+    if errors:
+        raise ValueError("; ".join(errors))
+    return create_posture_finding(
+        pack=pack,
+        finding=finding,
+        workflow_id=workflow_id,
+        check_id=check_id,
+        user_impact=user_impact,
+        missing_expectation=missing_expectation,
+        should_be_automated=should_be_automated,
+        suggested_assertion=suggested_assertion,
+        suggested_checklist_update=suggested_checklist_update,
+        evidence=evidence,
+        owner=owner,
+        status=status,
+    )

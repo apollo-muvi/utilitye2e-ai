@@ -1,7 +1,11 @@
 import pytest
 
-from application.workflows import render_posture_pack
-from core.posture import PosturePack, render_posture_markdown
+from application.workflows import create_posture_finding_record, render_posture_pack
+from core.posture import (
+    PosturePack,
+    create_posture_finding,
+    render_posture_markdown,
+)
 
 
 def _pack_dict():
@@ -85,3 +89,68 @@ workflows:
     )
 
     assert "`smoke-1` Check the workflow." in render_posture_pack(str(path))
+
+
+def test_create_posture_finding_infers_check_context():
+    pack = PosturePack.from_dict(_pack_dict())
+
+    finding = create_posture_finding(
+        pack=pack,
+        check_id="multi-image-browse",
+        finding="Image opens but cannot browse to the next image.",
+        user_impact="Parent cannot inspect all attachments from detail view.",
+    )
+
+    assert finding.product == "ClassHub"
+    assert finding.workflow_id == "parent-images"
+    assert finding.check_text == "Multiple images support browsing."
+    assert finding.category == "ux expectation"
+    assert finding.should_be_automated is True
+
+
+def test_create_posture_finding_can_override_automation_candidate():
+    pack = PosturePack.from_dict(_pack_dict())
+
+    finding = create_posture_finding(
+        pack=pack,
+        check_id="multi-image-browse",
+        finding="Product decision needed before automation.",
+        should_be_automated=False,
+    )
+
+    assert finding.should_be_automated is False
+
+
+def test_create_posture_finding_rejects_unknown_check_id():
+    pack = PosturePack.from_dict(_pack_dict())
+
+    with pytest.raises(ValueError, match="unknown check id: missing-check"):
+        create_posture_finding(pack=pack, check_id="missing-check", finding="Bug")
+
+
+def test_create_posture_finding_record_loads_yaml_file(tmp_path):
+    path = tmp_path / "pack.yaml"
+    path.write_text(
+        """
+product: Demo
+workflows:
+  - id: smoke
+    title: Smoke
+    checks:
+      - id: smoke-check
+        text: Check the workflow.
+""".strip(),
+        encoding="utf-8",
+    )
+
+    finding = create_posture_finding_record(
+        pack_path=str(path),
+        check_id="smoke-check",
+        finding="Workflow has an unclear empty state.",
+        suggested_assertion="Empty state includes recovery action.",
+        evidence=["screenshot.png"],
+    )
+
+    assert finding.workflow_id == "smoke"
+    assert finding.evidence == ["screenshot.png"]
+    assert "suggested_assertion: Empty state" in finding.to_yaml()

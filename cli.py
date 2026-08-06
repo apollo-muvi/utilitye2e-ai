@@ -16,8 +16,13 @@ import argparse
 # Ensure project root is on path when running from source
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from application.workflows import analyze_test_spec, build_analyzer, run_test_spec
-from application.workflows import render_posture_pack
+from application.workflows import (
+    analyze_test_spec,
+    build_analyzer,
+    create_posture_finding_record,
+    render_posture_pack,
+    run_test_spec,
+)
 from config import load_config
 from adapters.schema import create_schema_adapter
 from core.spec import TestSpec
@@ -99,6 +104,16 @@ def cmd_web(args, config):
     )
 
 
+def cmd_posture(args, config):
+    if args.posture_command == "render":
+        cmd_posture_render(args, config)
+        return
+    if args.posture_command == "finding" and args.finding_command == "create":
+        cmd_posture_finding_create(args, config)
+        return
+    raise ValueError(f"Unsupported posture command: {args.posture_command}")
+
+
 def cmd_posture_render(args, config):
     worksheet = render_posture_pack(args.pack)
     if args.output:
@@ -107,6 +122,36 @@ def cmd_posture_render(args, config):
         print(f"Posture worksheet saved to: {args.output}")
         return
     print(worksheet, end="")
+
+
+def cmd_posture_finding_create(args, config):
+    should_be_automated = None
+    if args.automation_candidate:
+        should_be_automated = True
+    elif args.no_automation:
+        should_be_automated = False
+
+    finding = create_posture_finding_record(
+        pack_path=args.pack,
+        finding=args.finding,
+        workflow_id=args.workflow_id,
+        check_id=args.check_id,
+        user_impact=args.impact,
+        missing_expectation=args.missing_expectation,
+        should_be_automated=should_be_automated,
+        suggested_assertion=args.suggested_assertion,
+        suggested_checklist_update=args.suggested_checklist_update,
+        evidence=args.evidence,
+        owner=args.owner,
+        status=args.status,
+    )
+    output = finding.to_yaml()
+    if args.output:
+        with open(args.output, "w", encoding="utf-8") as f:
+            f.write(output)
+        print(f"Posture finding saved to: {args.output}")
+        return
+    print(output, end="")
 
 
 def main():
@@ -137,6 +182,30 @@ def main():
     )
     p_posture_render.add_argument("--pack", "-p", required=True)
     p_posture_render.add_argument("--output", "-o", default="")
+    p_posture_finding = posture_sub.add_parser(
+        "finding", help="Create and manage posture findings"
+    )
+    finding_sub = p_posture_finding.add_subparsers(
+        dest="finding_command", required=True
+    )
+    p_finding_create = finding_sub.add_parser(
+        "create", help="Create a structured posture finding"
+    )
+    p_finding_create.add_argument("--pack", "-p", required=True)
+    p_finding_create.add_argument("--finding", required=True)
+    p_finding_create.add_argument("--workflow-id", default="")
+    p_finding_create.add_argument("--check-id", default="")
+    p_finding_create.add_argument("--impact", default="")
+    p_finding_create.add_argument("--missing-expectation", default="")
+    automation_group = p_finding_create.add_mutually_exclusive_group()
+    automation_group.add_argument("--automation-candidate", action="store_true")
+    automation_group.add_argument("--no-automation", action="store_true")
+    p_finding_create.add_argument("--suggested-assertion", default="")
+    p_finding_create.add_argument("--suggested-checklist-update", default="")
+    p_finding_create.add_argument("--evidence", action="append", default=[])
+    p_finding_create.add_argument("--owner", default="")
+    p_finding_create.add_argument("--status", default="open")
+    p_finding_create.add_argument("--output", "-o", default="")
     sub.add_parser("web", help="Start Web UI")
 
     # config file option on top-level
@@ -150,7 +219,7 @@ def main():
         "columns": cmd_columns,
         "analyze": cmd_analyze,
         "run": cmd_run,
-        "posture": cmd_posture_render,
+        "posture": cmd_posture,
         "web": cmd_web,
     }
     cmds[args.command](args, config)
