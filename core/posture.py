@@ -251,6 +251,243 @@ class PostureAssertionCandidate:
         )
 
 
+def init_posture_pack_from_dom(
+    product: str,
+    dom: Dict[str, Any],
+    url: str = "",
+) -> PosturePack:
+    """Generate a starter posture pack from crawled DOM data.
+
+    Classification is based on DOM source signals, NOT hardcoded labels:
+      - navItems → high-confidence navigation → own workflow each
+      - links    → medium-confidence → own workflow each
+      - buttons  → low-confidence → grouped into a "REVIEW: buttons" workflow
+                   so the user decides which are real navigation vs action buttons
+
+    This works for any website without site-specific keyword lists.
+    """
+    import hashlib
+    import re
+
+    def _slug(text: str) -> str:
+        slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+        if slug:
+            return slug
+        return hashlib.md5(text.encode("utf-8")).hexdigest()[:8]
+
+    def _resolve_input_label(inp: Dict[str, Any]) -> str:
+        """Get the best available label for an input, in priority order."""
+        return (
+            inp.get("label", "").strip()
+            or inp.get("placeholder", "").strip()
+            or inp.get("name", "").strip()
+            or inp.get("id", "").strip()
+        )
+
+    # unique ID registry — ensures no collisions across workflows and checks
+    _used_ids: set = set()
+
+    def _unique_id(base: str) -> str:
+        """Return base if unused, else append -2, -3, ... until unique."""
+        candidate = base
+        n = 2
+        while candidate in _used_ids:
+            candidate = f"{base}-{n}"
+            n += 1
+        _used_ids.add(candidate)
+        return candidate
+
+    def _clean_label(text: str) -> str:
+        return text.strip()
+
+    def _is_obvious_noise(text: str) -> bool:
+        """Only universal structural noise — no site-specific words."""
+        low = text.lower().strip()
+        if not low:
+            return True
+        # pure version numbers / build hashes like "9.0.0.4.386_9794"
+        if re.match(r"^[\d._-]+$", low):
+            return True
+        # empty after stripping whitespace-only chars
+        if len(low) < 2:
+            return True
+        return False
+
+    def _dedupe(items: List[Any], key: str) -> List[Dict[str, Any]]:
+        seen = set()
+        result = []
+        for item in items:
+            if isinstance(item, dict):
+                val = item.get(key, "").strip()
+            else:
+                val = str(item).strip()
+            if val and val not in seen:
+                seen.add(val)
+                result.append(item if isinstance(item, dict) else {key: val})
+        return result
+
+    def _make_nav_workflow(label: str) -> PostureWorkflow:
+        slug = _unique_id(_slug(label))
+        return PostureWorkflow(
+            id=slug,
+            title=label,
+            role="User",
+            entry_point=f"{label}",
+            checks=[
+                PostureCheck(
+                    id=_unique_id(f"{slug}-page-loads"),
+                    text=f'"{label}" loads without error',
+                    category="navigation",
+                ),
+                PostureCheck(
+                    id=_unique_id(f"{slug}-content-visible"),
+                    text=f'"{label}" shows expected content',
+                    category="status",
+                ),
+            ],
+        )
+
+    # ── classify by source confidence ──
+    workflows: List[PostureWorkflow] = []
+
+    # Tier 1: navItems (high confidence — crawled from semantic nav containers)
+    nav_labels: List[str] = []
+    for item in _dedupe(dom.get("navItems", []), "text"):
+        text = _clean_label(item.get("text", ""))
+        if text and 2 <= len(text) <= 40 and not _is_obvious_noise(text):
+            nav_labels.append(text)
+
+    # Tier 2: links (medium confidence — may include footer/header links)
+    link_labels: List[str] = []
+    for item in _dedupe(dom.get("links", []), "text"):
+        text = _clean_label(item.get("text", ""))
+        if text and 2 <= len(text) <= 40 and not _is_obvious_noise(text):
+            # skip if already captured as navItem
+            if text.lower() not in {l.lower() for l in nav_labels}:
+                link_labels.append(text)
+
+    # create workflows from high/medium-confidence sources
+    for label in nav_labels[:15]:
+        workflows.append(_make_nav_workflow(label))
+    for label in link_labels[:10]:
+        workflows.append(_make_nav_workflow(label))
+
+    # Tier 3: buttons (low confidence — could be nav OR action buttons)
+    # Group into a REVIEW workflow so the user triages them
+    button_labels: List[str] = []
+    for item in _dedupe(dom.get("buttons", []), "text"):
+        text = _clean_label(item.get("text", ""))
+        if text and 2 <= len(text) <= 40 and not _is_obvious_noise(text):
+            if text.lower() not in {l.lower() for l in nav_labels + link_labels}:
+                button_labels.append(text)
+
+    if button_labels:
+        review_checks = [
+            PostureCheck(
+                id=_unique_id(f"review-btn-{_slug(t)}"),
+                text=f'"{t}" — Is this navigation or an action button? '
+                     f"Keep if it leads to a page; remove if it performs an action.",
+                category="review",
+            )
+            for t in button_labels[:15]
+        ]
+        workflows.append(
+            PostureWorkflow(
+                id=_unique_id("review-buttons"),
+                title="REVIEW: Buttons (triage needed)",
+                role="User",
+                entry_point="These buttons were found but could be navigation OR actions. "
+                            "Decide for each: keep as a workflow, or delete.",
+                checks=review_checks,
+            )
+        )
+
+    # Tier 4: form inputs — dedupe by resolved label (label → placeholder → name → id)
+    raw_inputs = dom.get("inputs", [])
+    seen_input_labels: set = set()
+    inputs: List[Dict[str, Any]] = []
+    for inp in raw_inputs:
+        if not isinstance(inp, dict):
+            continue
+        label = _resolve_input_label(inp)
+        if label and label.lower() not in seen_input_labels:
+            seen_input_labels.add(label.lower())
+            inputs.append({**inp, "_resolved_label": label})
+    if inputs:
+        form_checks: List[PostureCheck] = []
+        for inp in inputs[:10]:
+            label = inp.get("_resolved_label", "")
+            if label:
+                slug = _slug(label)
+                form_checks.append(
+                    PostureCheck(
+                        id=_unique_id(f"form-{slug}-editable"),
+                        text=f'"{label}" field is editable and accepts input',
+                        category="form",
+                    )
+                )
+        if form_checks:
+            workflows.append(
+                PostureWorkflow(
+                    id=_unique_id("forms-and-inputs"),
+                    title="Forms and Inputs",
+                    role="User",
+                    entry_point="Form fields discovered on the page",
+                    checks=form_checks,
+                )
+            )
+
+    # fallback: nothing discovered at all
+    if not workflows:
+        workflows.append(
+            PostureWorkflow(
+                id=_unique_id("page-overview"),
+                title="Page Overview",
+                role="User",
+                entry_point=url or "Target URL",
+                checks=[
+                    PostureCheck(
+                        id=_unique_id("page-loads"),
+                        text="Page loads without error",
+                        category="navigation",
+                    ),
+                    PostureCheck(
+                        id=_unique_id("key-elements-present"),
+                        text="Key interactive elements are present and visible",
+                        category="status",
+                    ),
+                ],
+            )
+        )
+
+    return PosturePack(
+        product=product,
+        version="auto-generated",
+        purpose=f"Auto-generated posture review pack for {product}. "
+        "Items marked REVIEW need human triage before use.",
+        roles=["User"],
+        workflows=workflows,
+        invariants=[
+            PostureInvariant(
+                id="navigation-back-path",
+                text="Back path sanity",
+                question="After navigating to a page, can the user return without confusion?",
+            ),
+            PostureInvariant(
+                id="error-recovery",
+                text="Error recovery",
+                question="Do error states offer a recoverable action?",
+            ),
+        ],
+        release_gate=[
+            "All REVIEW items triaged: kept as workflow or removed.",
+            "All navigation items open without error.",
+            "Forms accept input and submit/save works.",
+            "No broken or empty pages.",
+        ],
+    )
+
+
 def create_posture_finding(
     pack: PosturePack,
     finding: str,

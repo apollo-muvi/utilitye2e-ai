@@ -9,6 +9,7 @@ from application.workflows import (
 from core.posture import (
     PosturePack,
     create_posture_finding,
+    init_posture_pack_from_dom,
     promote_posture_finding,
     render_posture_markdown,
 )
@@ -282,3 +283,112 @@ def test_promote_posture_finding_record_loads_yaml_file(tmp_path):
     assert candidate.assertion == "Verify gallery navigation exists."
     assert candidate.priority == "high"
     assert "source_finding: Image cannot browse" in candidate.to_yaml()
+
+
+def test_init_posture_pack_from_nav_dom():
+    """init should create workflows from navItems and links, buttons go to REVIEW."""
+    dom = {
+        "navItems": [{"text": "Dashboard"}, {"text": "Settings"}],
+        "links": [{"text": "Dashboard"}, {"text": "Profile"}],
+        "buttons": [{"text": "Save"}],
+        "inputs": [{"label": "Username"}, {"label": "Password"}],
+    }
+    pack = init_posture_pack_from_dom(product="TestApp", dom=dom, url="http://x")
+    assert pack.product == "TestApp"
+    titles = [w.title for w in pack.workflows]
+    # navItems become workflows
+    assert "Dashboard" in titles
+    assert "Settings" in titles
+    # links deduped against navItems, new ones become workflows
+    assert "Profile" in titles
+    # buttons go to REVIEW, not their own workflows
+    review_wf = [w for w in pack.workflows if w.id == "review-buttons"]
+    assert len(review_wf) == 1
+    assert any("Save" in c.text for c in review_wf[0].checks)
+    # form inputs become their own workflow
+    form_wf = [w for w in pack.workflows if w.id == "forms-and-inputs"]
+    assert len(form_wf) == 1
+    assert any("Username" in c.text for c in form_wf[0].checks)
+    errors = pack.validate()
+    assert errors == []
+
+
+def test_init_posture_pack_empty_dom():
+    """init with empty DOM should still produce a valid generic pack."""
+    pack = init_posture_pack_from_dom(product="EmptyApp", dom={}, url="http://x")
+    assert pack.product == "EmptyApp"
+    assert len(pack.workflows) >= 1
+    errors = pack.validate()
+    assert errors == []
+
+
+def test_init_posture_pack_cjk_unique_ids():
+    """CJK nav labels should produce unique hashed IDs."""
+    dom = {
+        "navItems": [
+            {"text": "教師"}, {"text": "家長"}, {"text": "管理"},
+        ],
+    }
+    pack = init_posture_pack_from_dom(product="CJKApp", dom=dom, url="http://x")
+    ids = [w.id for w in pack.workflows if w.id != "forms-and-inputs"]
+    assert len(ids) == len(set(ids)), f"duplicate IDs: {ids}"
+    assert all(w.id != "item" for w in pack.workflows), "fallback 'item' slug leaked"
+    errors = pack.validate()
+    assert errors == []
+
+
+def test_init_posture_pack_no_hardcoded_noise():
+    """init must NOT filter by hardcoded labels — version numbers only."""
+    dom = {
+        "navItems": [
+            {"text": "Logout"}, {"text": "9.0.0.4.386_9794"},
+            {"text": "Dashboard"},
+        ],
+        "buttons": [{"text": "Save"}, {"text": "Delete"}],
+    }
+    pack = init_posture_pack_from_dom(product="NoHardcode", dom=dom, url="http://x")
+    nav_titles = [w.title for w in pack.workflows if w.id != "review-buttons"]
+    # Logout is a valid navItem source — must NOT be hardcoded-filtered
+    assert "Logout" in nav_titles, "Logout was hardcoded-filtered (shouldn't be)"
+    # pure version numbers ARE filtered (structural noise)
+    assert "9.0.0.4.386_9794" not in nav_titles
+    # buttons go to REVIEW regardless of their text
+    review = [w for w in pack.workflows if "review" in w.id]
+    assert len(review) == 1
+    review_texts = " ".join(c.text for c in review[0].checks)
+    assert "Save" in review_texts
+
+
+def test_init_posture_pack_placeholder_name_inputs():
+    """Inputs with only placeholder/name (no label) must not be silently dropped."""
+    dom = {
+        "inputs": [
+            {"placeholder": "Email"},
+            {"name": "password"},
+            {"id": "search-box"},
+        ],
+    }
+    pack = init_posture_pack_from_dom(product="FormApp", dom=dom, url="http://x")
+    form_wf = [w for w in pack.workflows if "forms" in w.id]
+    assert len(form_wf) == 1, "form workflow missing"
+    texts = " ".join(c.text for c in form_wf[0].checks)
+    assert "Email" in texts, "placeholder-only input dropped"
+    assert "password" in texts, "name-only input dropped"
+    assert "search-box" in texts, "id-only input dropped"
+
+
+def test_init_posture_pack_no_duplicate_ids():
+    """Labels that slug identically must produce unique workflow and check IDs."""
+    dom = {
+        "navItems": [
+            {"text": "Settings"},
+            {"text": "settings"},
+            {"text": "Settings!"},
+        ],
+    }
+    pack = init_posture_pack_from_dom(product="SlugApp", dom=dom, url="http://x")
+    all_ids = []
+    for w in pack.workflows:
+        all_ids.append(w.id)
+        all_ids.extend(c.id for c in w.checks)
+    assert len(all_ids) == len(set(all_ids)), f"duplicate IDs: {all_ids}"

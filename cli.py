@@ -21,6 +21,7 @@ from application.workflows import (
     analyze_test_spec,
     build_analyzer,
     create_posture_finding_record,
+    init_posture_pack,
     list_posture_finding_records,
     promote_posture_finding_record,
     render_posture_pack,
@@ -108,6 +109,9 @@ def cmd_web(args, config):
 
 
 def cmd_posture(args, config):
+    if args.posture_command == "init":
+        cmd_posture_init(args, config)
+        return
     if args.posture_command == "render":
         cmd_posture_render(args, config)
         return
@@ -121,6 +125,27 @@ def cmd_posture(args, config):
         cmd_posture_finding_promote(args, config)
         return
     raise ValueError(f"Unsupported posture command: {args.posture_command}")
+
+
+def cmd_posture_init(args, config):
+    pack = init_posture_pack(
+        product=args.product,
+        url=args.url,
+        login_url=args.login_url,
+        username=args.username,
+        password=args.password,
+    )
+    import yaml
+
+    output = yaml.safe_dump(pack.to_dict(), allow_unicode=True, sort_keys=False)
+    if args.output:
+        with open(args.output, "w", encoding="utf-8") as f:
+            f.write(output)
+        print(f"Posture pack saved to: {args.output}")
+        print(f"  {len(pack.workflows)} workflows, "
+              f"{sum(len(w.checks) for w in pack.workflows)} checks")
+        return
+    print(output, end="")
 
 
 def cmd_posture_render(args, config):
@@ -266,6 +291,15 @@ def main():
     p_run.add_argument("--headed", action="store_true", help="Show browser")
     p_posture = sub.add_parser("posture", help="Posture review utilities")
     posture_sub = p_posture.add_subparsers(dest="posture_command", required=True)
+    p_posture_init = posture_sub.add_parser(
+        "init", help="Crawl a URL and auto-generate a posture pack"
+    )
+    p_posture_init.add_argument("--url", required=True, help="Target URL to crawl")
+    p_posture_init.add_argument("--product", required=True, help="Product name")
+    p_posture_init.add_argument("--login-url", default="")
+    p_posture_init.add_argument("--username", default="")
+    p_posture_init.add_argument("--password", default="")
+    p_posture_init.add_argument("--output", "-o", default="")
     p_posture_render = posture_sub.add_parser(
         "render", help="Render a posture pack as a manual worksheet"
     )
