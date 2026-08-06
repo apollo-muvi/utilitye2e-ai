@@ -17,6 +17,7 @@ import argparse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from application.workflows import analyze_test_spec, build_analyzer, run_test_spec
+from application.workflows import render_posture_pack
 from config import load_config
 from adapters.schema import create_schema_adapter
 from core.spec import TestSpec
@@ -98,6 +99,16 @@ def cmd_web(args, config):
     )
 
 
+def cmd_posture_render(args, config):
+    worksheet = render_posture_pack(args.pack)
+    if args.output:
+        with open(args.output, "w", encoding="utf-8") as f:
+            f.write(worksheet)
+        print(f"Posture worksheet saved to: {args.output}")
+        return
+    print(worksheet, end="")
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="utilitye2e-ai",
@@ -119,6 +130,13 @@ def main():
     p_run = sub.add_parser("run", help="Execute a test spec")
     p_run.add_argument("--spec", "-s", required=True)
     p_run.add_argument("--headed", action="store_true", help="Show browser")
+    p_posture = sub.add_parser("posture", help="Posture review utilities")
+    posture_sub = p_posture.add_subparsers(dest="posture_command", required=True)
+    p_posture_render = posture_sub.add_parser(
+        "render", help="Render a posture pack as a manual worksheet"
+    )
+    p_posture_render.add_argument("--pack", "-p", required=True)
+    p_posture_render.add_argument("--output", "-o", default="")
     sub.add_parser("web", help="Start Web UI")
 
     # config file option on top-level
@@ -132,6 +150,7 @@ def main():
         "columns": cmd_columns,
         "analyze": cmd_analyze,
         "run": cmd_run,
+        "posture": cmd_posture_render,
         "web": cmd_web,
     }
     cmds[args.command](args, config)

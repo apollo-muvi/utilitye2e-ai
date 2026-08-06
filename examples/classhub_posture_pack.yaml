@@ -1,0 +1,115 @@
+product: ClassHub
+version: "2026-08-06"
+purpose: >
+  Manual posture review for ClassHub workflows that automated E2E scripts can
+  miss when the product expectation has not yet been written as an assertion.
+
+roles:
+  - Parent
+  - Teacher
+  - Admin
+
+workflows:
+  - id: parent-notification-contact-book
+    title: Parent notification to contact book
+    role: Parent
+    entry_point: Push notification or notification list
+    checks:
+      - id: parent-notification-opens-detail
+        text: Notification opens the expected contact-book detail.
+        category: navigation
+      - id: parent-notification-date-consistency
+        text: Notification date and contact-book detail date use the same business logic.
+        category: consistency
+        automation_candidate: true
+      - id: parent-notification-back-path
+        text: Returning from detail lands somewhere reasonable for the parent workflow.
+        category: navigation
+      - id: parent-notification-expired-state
+        text: Missing or expired content has a clear state instead of a broken page.
+        category: recoverability
+
+  - id: parent-image-attachments
+    title: Parent image attachments
+    role: Parent
+    entry_point: Contact-book detail with one or more images
+    checks:
+      - id: parent-image-single-open-close
+        text: Single image opens, closes, and preserves context.
+        category: media
+      - id: parent-image-multiple-browse
+        text: Multiple images support next/previous browsing or another explicit gallery affordance.
+        category: ux expectation
+      - id: parent-image-zoom-dismiss
+        text: Zoomed image can be dismissed without losing the workflow.
+        category: media
+      - id: parent-image-broken-fallback
+        text: Broken image has a visible fallback state.
+        category: recoverability
+
+  - id: teacher-publish-parent-view
+    title: Teacher publish to parent view
+    role: Teacher
+    entry_point: Teacher creates or edits a contact-book item
+    checks:
+      - id: teacher-publish-required-fields
+        text: Required fields are obvious before submission.
+        category: form
+      - id: teacher-publish-image-preview
+        text: Attached images appear in preview before publish.
+        category: media
+      - id: teacher-publish-parent-notification
+        text: Parent notification appears for the intended audience only.
+        category: audience
+        automation_candidate: true
+      - id: teacher-publish-parent-content-match
+        text: Parent detail content, date, image, and reply behavior match the teacher intent.
+        category: consistency
+
+  - id: admin-identity-consistency
+    title: Admin identity and data consistency
+    role: Admin
+    entry_point: Admin changes student, parent, class, or teacher relationships
+    checks:
+      - id: admin-relationship-propagates
+        text: Relationship changes appear consistently across role views.
+        category: consistency
+        automation_candidate: true
+      - id: admin-display-name-consistency
+        text: Parent display names and student labels do not conflict across list, detail, and notification.
+        category: consistency
+      - id: admin-tenant-isolation
+        text: Tenant or class context is not leaked across accounts.
+        category: security
+        automation_candidate: true
+
+invariants:
+  - id: same-record-same-date
+    text: Same record, same date logic
+    question: Does the same item show the same effective date across notification, list, and detail?
+  - id: same-record-same-audience
+    text: Same record, same audience
+    question: Do all intended recipients see it, and only them?
+  - id: same-attachment-same-viewer
+    text: Same attachment, same viewer behavior
+    question: Does image behavior stay consistent across entry points?
+  - id: recoverable-state
+    text: Recoverable state
+    question: Can the user recover from loading, empty, expired, or failed states?
+
+release_gate:
+  - Automated known-risk suite passes.
+  - Parent notification-to-contact-book path checked manually.
+  - Teacher publish-to-parent-view path checked manually.
+  - Image attachment behavior checked with one image and multiple images.
+  - New findings classified and either converted to assertions or retained in the checklist.
+
+finding_template:
+  - Finding
+  - User impact
+  - Missing expectation
+  - Should become automated
+  - Suggested assertion
+  - Suggested checklist update
+  - Evidence
+  - Owner

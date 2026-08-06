@@ -7,6 +7,7 @@ from .workflows import (
     build_selectable_elements,
     derive_login_url,
     discover_page,
+    render_posture_pack,
     run_test_spec,
 )
 
@@ -17,5 +18,6 @@ __all__ = [
     "build_selectable_elements",
     "derive_login_url",
     "discover_page",
+    "render_posture_pack",
     "run_test_spec",
 ]

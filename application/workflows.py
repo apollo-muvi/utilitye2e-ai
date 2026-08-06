@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 
 from adapters.llm import create_llm_adapter
 from adapters.schema import create_schema_adapter
+from core.posture import PosturePack, render_posture_markdown
 from ai.analyzer import Analyzer
 from core.recorder import TestResult
 from core.spec import TestSpec
@@ -162,3 +163,12 @@ async def run_test_spec_async(spec: TestSpec, headed: bool = False) -> RunResult
 def run_test_spec(spec: TestSpec, headed: bool = False) -> RunResult:
     """Synchronous wrapper for CLI and Flask routes."""
     return asyncio.run(run_test_spec_async(spec, headed=headed))
+
+
+def render_posture_pack(pack_path: str) -> str:
+    """Load and render a posture pack as a manual review worksheet."""
+    pack = PosturePack.from_file(pack_path)
+    errors = pack.validate()
+    if errors:
+        raise ValueError("; ".join(errors))
+    return render_posture_markdown(pack)

@@ -2,7 +2,15 @@
 
 English | [繁體中文](README.zh-TW.md)
 
-Open-source E2E test generator — AI discovers page elements, generates test steps, and runs them via Playwright with DOM snapshot diffing.
+Open-source testing utility for two different QA problems:
+
+1. **Known-risk regression** — AI discovers page elements, generates executable test steps, and runs them through Playwright with DOM snapshot diffing.
+2. **Unknown-risk posture review** — role-based workflow checklists help reviewers find UX, consistency, and product expectation gaps that scripts cannot infer from missing acceptance criteria.
+
+Detailed architecture and project planning live outside this repo:
+
+- `/home/apollo/Project_detail/utilitye2e-ai/architecture-and-posture-testing.md`
+- `/home/apollo/Project_detail/utilitye2e-ai/classhub-posture-smoke-checklist.md`
 
 ## How it works
 
@@ -14,19 +22,23 @@ Open-source E2E test generator — AI discovers page elements, generates test st
 3. User selects elements (checkbox) → AI generates test steps
         ↓
 4. Review/edit steps → Run → DOM diff report
+5. Use posture checklist for issues not captured by the generated spec
 ```
 
 The runner uses **DOM snapshot diffing**: snapshot before click → click → snapshot after → compare. No need to classify button behavior (modal? form? alert?) — if DOM changed, the button works.
 
+The posture layer is intentionally different: it is a manual, role-based review path for risks that have not yet been turned into assertions. Once a reviewer finds a gap, the finding should become an acceptance criterion, checklist item, or automated assertion.
+
 ### Key design principles
 
+- **Known risk vs unknown risk** — automation guards behavior that is already specified; posture review searches for missing expectations.
 - **DOM diff, not classification** — click → compare DOM before/after. Generic, works on any UI.
-- **Generic deep scan** — discover crawls every button, clicks it, fills any revealed form, submits, and collects new buttons. No hardcoded keywords.
-- **Config-free targets** — all connection info (target URL, login, credentials) entered in the Web UI, not config files.
+- **Generic deep scan** — discover crawls buttons, fills revealed forms, submits, and collects new buttons without hardcoded product keywords.
+- **Config-free targets** — target URL, login, and credentials are entered in the Web UI at runtime.
 - **Shared workflows** — Web UI and CLI call the same application use cases for discover, analyze, and run.
 - **Single auth boundary** — browser login is routed through `core.auth` to avoid duplicated authentication flows.
-- **Config-driven locator strategies** — selector types defined in YAML, not code. Add a new selector type (e.g. `data-cy`) = add one YAML block. Zero code changes.
-- **Three-layer locator resolution** — Config strategies (fast) → AI fallback (smart) → Fuzzy text match (last resort). Maximizes element location success rate.
+- **Config-driven locator strategies** — selector types are defined in YAML instead of Python branches.
+- **Three-layer locator resolution** — Config strategies → AI fallback → fuzzy text match.
 
 ## Quick start
 
@@ -41,6 +53,9 @@ cp config.example.yaml config.yaml
 # Run Web UI
 utilitye2e-ai web
 # → http://localhost:5001
+
+# Render a posture review worksheet
+utilitye2e-ai posture render --pack examples/classhub_posture_pack.yaml
 ```
 
 ## Web UI flow
@@ -88,6 +103,17 @@ config.yaml        # LLM + schema adapter config (no target info)
 cli.py             # CLI entry point
 ```
 
+The repo architecture stays intentionally small. New behavior should usually enter through one of these boundaries:
+
+| Boundary | Use it for | Keep out |
+|----------|------------|----------|
+| `application/` | Discover/analyze/run workflows shared by CLI and web | Flask request objects, UI-only formatting |
+| `core/` | Serializable contracts, auth boundary, runner primitives | HTTP routes, LLM provider details |
+| `ai/` | Browser inspection, crawling, prompts, LLM-facing analysis | Web route orchestration |
+| `adapters/` | Replaceable LLM and schema integrations | Product-specific workflow rules |
+| `config/` | Declarative locator behavior | Hardcoded selector branches |
+| external project docs | Architecture plans, posture checklists, release review guides | Tracked repo `docs/` content |
+
 ### Request flow
 
 ```
@@ -110,6 +136,19 @@ The Flask routes stay thin: they read request data, call application workflows, 
 | **SchemaAdapter** | Read table/column info | Manual JSON | PostgreSQL, SQLite, MySQL |
 | **LLMAdapter** | Analyze DOM → TestSpec | GLM (z.ai), OpenAI, Ollama | Any provider |
 | **Runner** | Execute test via DOM diff | Playwright | Other engines |
+| **Posture packs** | Manual workflow review for missing assertions | External markdown checklist | Product-specific scenario packs |
+
+## Posture packs
+
+Posture packs are structured YAML inputs for manual review worksheets. They do not replace automated specs; they capture role workflows, cross-screen invariants, release gates, and bug-to-assertion fields for unknown-risk review.
+
+```bash
+utilitye2e-ai posture render \
+  --pack examples/classhub_posture_pack.yaml \
+  --output /tmp/classhub-posture-worksheet.md
+```
+
+The built-in ClassHub example covers parent notification → contact book, image attachments, teacher publish → parent view, and admin identity consistency.
 
 ### Authentication boundary
 
@@ -212,6 +251,7 @@ MIT
 - **Config-driven locators**: selector types defined in YAML — add `data-cy`, `data-qa`, etc. without touching code
 - **Three-layer resolution**: Config strategies → AI fallback → Fuzzy text match — maximizes element location success rate
 - **Reload verification**: after click, reloads page and compares DOM to confirm persistence
+- **Manual posture path**: external checklist captures UX and consistency issues that are not yet automated assertions
 
 ### Known limitations
 
@@ -222,9 +262,12 @@ MIT
 | Complex interactions unsupported | Drag-and-drop, file upload, multi-tab, iframes |
 | Simple reports | Only DOM +/- counts; no screenshot, trace, or shareable format |
 | Timeout handling | Locator resolution is resilient (3-layer), but waits still use fixed timeouts — no smart retry yet |
+| Unknown UX expectations are not inferable | If a requirement never says "image viewer supports swipe", generated scripts cannot assert it |
 
 ### Phase 2 — planned improvements
 
 - AI auto-orders steps (create → edit → delete sequence)
 - Per-step screenshot + HTML snapshot evidence
 - Smart wait with retry to reduce flakiness
+- Scenario packs for product-specific posture review
+- Bug → assertion → automation workflow so manual findings become regression coverage
