@@ -61,6 +61,8 @@ Never edit, commit, or push code directly on `main`. Always start from up-to-dat
 
 ## Documentation Storage Policy
 
-All repo should not store any doc on repo `docs` folder. All repo doc should move to `/home/apollo/Project_detail/{project name}` folder, because some repo may be public and no doc should be released to others by accident.
+Public project documentation may be stored in the repo `docs/` folder when it is intended to be published with the project.
 
-When creating or updating project documentation, write it under `/home/apollo/Project_detail/{project name}/` and link to it from the repo only when a pointer is necessary. Do not create or repopulate a tracked `docs/` directory in the repo.
+Do not put machine-local absolute paths in tracked repo files. Use repo-relative links such as `docs/architecture-and-posture-testing.md`.
+
+Private or sensitive project notes must stay outside the repo and must not be linked from tracked files with local absolute paths.

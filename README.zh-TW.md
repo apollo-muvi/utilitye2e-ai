@@ -7,10 +7,10 @@
 1. **Known-risk regression** — AI 自動探索頁面元素、產生可執行測試步驟，透過 Playwright 執行並以 DOM 快照差異產生報告。
 2. **Unknown-risk posture review** — 用角色 workflow checklist 找出腳本無法從缺漏 acceptance criteria 推論出的 UX、一致性、產品預期問題。
 
-詳細架構與專案規劃放在 repo 外：
+詳細架構與專案規劃：
 
-- `/home/apollo/Project_detail/utilitye2e-ai/architecture-and-posture-testing.md`
-- `/home/apollo/Project_detail/utilitye2e-ai/classhub-posture-smoke-checklist.md`
+- [Architecture and posture testing](docs/architecture-and-posture-testing.md)
+- [ClassHub posture smoke checklist](docs/classhub-posture-smoke-checklist.md)
 
 ## 運作流程
 
@@ -122,7 +122,7 @@ Repo 內架構刻意維持小而清楚。新增能力通常應該經過以下邊
 | `ai/` | Browser inspection、crawling、prompts、LLM-facing analysis | Web route orchestration |
 | `adapters/` | 可替換 LLM 與 schema integrations | 產品專屬 workflow 規則 |
 | `config/` | declarative locator behavior | hardcoded selector branches |
-| 外部專案文件 | 架構規劃、posture checklist、release review guide | repo 內 tracked `docs/` 內容 |
+| `docs/` | 架構規劃、posture checklist、release review guide | 本機絕對路徑 |
 
 ### 請求流程
 
