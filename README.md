@@ -7,10 +7,10 @@ Open-source testing utility for two different QA problems:
 1. **Known-risk regression** — AI discovers page elements, generates executable test steps, and runs them through Playwright with DOM snapshot diffing.
 2. **Unknown-risk posture review** — role-based workflow checklists help reviewers find UX, consistency, and product expectation gaps that scripts cannot infer from missing acceptance criteria.
 
-Detailed architecture and project planning live outside this repo:
+Detailed architecture and project planning:
 
-- `/home/apollo/Project_detail/utilitye2e-ai/architecture-and-posture-testing.md`
-- `/home/apollo/Project_detail/utilitye2e-ai/classhub-posture-smoke-checklist.md`
+- [Architecture and posture testing](docs/architecture-and-posture-testing.md)
+- [ClassHub posture smoke checklist](docs/classhub-posture-smoke-checklist.md)
 
 ## How it works
 
@@ -122,7 +122,7 @@ The repo architecture stays intentionally small. New behavior should usually ent
 | `ai/` | Browser inspection, crawling, prompts, LLM-facing analysis | Web route orchestration |
 | `adapters/` | Replaceable LLM and schema integrations | Product-specific workflow rules |
 | `config/` | Declarative locator behavior | Hardcoded selector branches |
-| external project docs | Architecture plans, posture checklists, release review guides | Tracked repo `docs/` content |
+| `docs/` | Architecture plans, posture checklists, release review guides | Machine-local absolute paths |
 
 ### Request flow
 

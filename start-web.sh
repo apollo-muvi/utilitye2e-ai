@@ -1,6 +1,6 @@
 #!/bin/bash
-cd /home/apollo/utilitye2e-ai
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
 source venv/bin/activate
-export PYTHONPATH=/home/apollo/utilitye2e-ai
-export PLAYWRIGHT_BROWSERS_PATH=/home/apollo/.cache/ms-playwright
+export PYTHONPATH="$SCRIPT_DIR"
 python3 web/app.py
