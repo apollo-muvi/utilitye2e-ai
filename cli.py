@@ -12,6 +12,7 @@ Usage:
 import sys
 import os
 import argparse
+import json
 
 # Ensure project root is on path when running from source
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -20,6 +21,7 @@ from application.workflows import (
     analyze_test_spec,
     build_analyzer,
     create_posture_finding_record,
+    list_posture_finding_records,
     render_posture_pack,
     run_test_spec,
 )
@@ -111,6 +113,9 @@ def cmd_posture(args, config):
     if args.posture_command == "finding" and args.finding_command == "create":
         cmd_posture_finding_create(args, config)
         return
+    if args.posture_command == "finding" and args.finding_command == "list":
+        cmd_posture_finding_list(args, config)
+        return
     raise ValueError(f"Unsupported posture command: {args.posture_command}")
 
 
@@ -152,6 +157,69 @@ def cmd_posture_finding_create(args, config):
         print(f"Posture finding saved to: {args.output}")
         return
     print(output, end="")
+
+
+def cmd_posture_finding_list(args, config):
+    findings = list_posture_finding_records(
+        path=args.path,
+        status=args.status,
+        automation_candidates=args.automation_candidates,
+        recursive=args.recursive,
+    )
+    if args.format == "json":
+        print(
+            json.dumps(
+                [finding.to_dict() for finding in findings],
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return
+    if args.format == "yaml":
+        print(
+            yaml_dump_all([finding.to_dict() for finding in findings]),
+            end="",
+        )
+        return
+    print(render_findings_table(findings))
+
+
+def yaml_dump_all(rows):
+    import yaml
+
+    return yaml.safe_dump(rows, allow_unicode=True, sort_keys=False)
+
+
+def render_findings_table(findings):
+    if not findings:
+        return "No posture findings found."
+
+    headers = ["status", "auto", "workflow", "check", "finding"]
+    rows = []
+    for finding in findings:
+        rows.append(
+            [
+                finding.status,
+                "yes" if finding.should_be_automated else "no",
+                finding.workflow_id,
+                finding.check_id,
+                finding.finding,
+            ]
+        )
+
+    widths = [
+        max(len(str(row[index])) for row in [headers] + rows)
+        for index in range(len(headers))
+    ]
+    lines = [
+        "  ".join(header.ljust(widths[index]) for index, header in enumerate(headers)),
+        "  ".join("-" * width for width in widths),
+    ]
+    for row in rows:
+        lines.append(
+            "  ".join(str(cell).ljust(widths[index]) for index, cell in enumerate(row))
+        )
+    return "\n".join(lines)
 
 
 def main():
@@ -206,6 +274,18 @@ def main():
     p_finding_create.add_argument("--owner", default="")
     p_finding_create.add_argument("--status", default="open")
     p_finding_create.add_argument("--output", "-o", default="")
+    p_finding_list = finding_sub.add_parser(
+        "list", help="List structured posture findings"
+    )
+    p_finding_list.add_argument("--path", "-p", required=True)
+    p_finding_list.add_argument("--status", default="")
+    p_finding_list.add_argument("--automation-candidates", action="store_true")
+    p_finding_list.add_argument("--recursive", action="store_true")
+    p_finding_list.add_argument(
+        "--format",
+        choices=["table", "json", "yaml"],
+        default="table",
+    )
     sub.add_parser("web", help="Start Web UI")
 
     # config file option on top-level

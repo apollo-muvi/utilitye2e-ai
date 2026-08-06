@@ -175,6 +175,12 @@ class PostureFinding:
         )
 
     @classmethod
+    def from_file(cls, path: str) -> "PostureFinding":
+        with open(path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        return cls.from_dict(data)
+
+    @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "PostureFinding":
         return cls(
             product=data.get("product", ""),
@@ -204,7 +210,7 @@ def create_posture_finding(
     should_be_automated: Optional[bool] = None,
     suggested_assertion: str = "",
     suggested_checklist_update: str = "",
-    evidence: List[str] | None = None,
+    evidence: Optional[List[str]] = None,
     owner: str = "",
     status: str = "open",
 ) -> PostureFinding:
@@ -215,6 +221,10 @@ def create_posture_finding(
 
     if check_id:
         workflow, check = pack.find_check(check_id)
+        if workflow_id and workflow_id != workflow.id:
+            raise ValueError(
+                f"check id {check_id} belongs to workflow {workflow.id}, not {workflow_id}"
+            )
         workflow_id = workflow.id
         check_text = check.text
         category = check.category
