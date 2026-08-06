@@ -9,9 +9,11 @@ from urllib.parse import urlparse
 from adapters.llm import create_llm_adapter
 from adapters.schema import create_schema_adapter
 from core.posture import (
+    PostureAssertionCandidate,
     PostureFinding,
     PosturePack,
     create_posture_finding,
+    promote_posture_finding,
     render_posture_markdown,
 )
 from ai.analyzer import Analyzer
@@ -244,3 +246,24 @@ def list_posture_finding_records(
             continue
         findings.append(finding)
     return findings
+
+
+def promote_posture_finding_record(
+    finding_path: str,
+    assertion: str = "",
+    assertion_type: str = "ui",
+    priority: str = "medium",
+    force: bool = False,
+) -> PostureAssertionCandidate:
+    """Load a finding record and promote it into an assertion candidate."""
+    finding = PostureFinding.from_file(finding_path)
+    errors = finding.validate()
+    if errors:
+        raise ValueError("; ".join(errors))
+    return promote_posture_finding(
+        finding=finding,
+        assertion=assertion,
+        assertion_type=assertion_type,
+        priority=priority,
+        force=force,
+    )

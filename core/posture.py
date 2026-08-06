@@ -200,6 +200,57 @@ class PostureFinding:
         )
 
 
+@dataclass
+class PostureAssertionCandidate:
+    product: str
+    assertion: str
+    source_finding: str
+    workflow_id: str = ""
+    check_id: str = ""
+    assertion_type: str = "ui"
+    priority: str = "medium"
+    status: str = "candidate"
+    user_impact: str = ""
+    expected_behavior: str = ""
+    evidence: List[str] = field(default_factory=list)
+
+    def validate(self) -> List[str]:
+        errors = []
+        if not self.product:
+            errors.append("product is required")
+        if not self.assertion:
+            errors.append("assertion is required")
+        if not self.source_finding:
+            errors.append("source_finding is required")
+        return errors
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    def to_yaml(self) -> str:
+        return yaml.safe_dump(
+            self.to_dict(),
+            allow_unicode=True,
+            sort_keys=False,
+        )
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "PostureAssertionCandidate":
+        return cls(
+            product=data.get("product", ""),
+            assertion=data.get("assertion", ""),
+            source_finding=data.get("source_finding", ""),
+            workflow_id=data.get("workflow_id", ""),
+            check_id=data.get("check_id", ""),
+            assertion_type=data.get("assertion_type", "ui"),
+            priority=data.get("priority", "medium"),
+            status=data.get("status", "candidate"),
+            user_impact=data.get("user_impact", ""),
+            expected_behavior=data.get("expected_behavior", ""),
+            evidence=list(data.get("evidence", [])),
+        )
+
+
 def create_posture_finding(
     pack: PosturePack,
     finding: str,
@@ -256,6 +307,43 @@ def create_posture_finding(
     if errors:
         raise ValueError("; ".join(errors))
     return finding_record
+
+
+def promote_posture_finding(
+    finding: PostureFinding,
+    assertion: str = "",
+    assertion_type: str = "ui",
+    priority: str = "medium",
+    force: bool = False,
+) -> PostureAssertionCandidate:
+    """Promote an automation-ready finding into an assertion candidate."""
+    if not finding.should_be_automated and not force:
+        raise ValueError(
+            "finding is not marked as automation candidate; pass force=True to promote"
+        )
+
+    assertion_text = (
+        assertion
+        or finding.suggested_assertion
+        or finding.missing_expectation
+        or f"Verify: {finding.finding}"
+    )
+    candidate = PostureAssertionCandidate(
+        product=finding.product,
+        assertion=assertion_text,
+        source_finding=finding.finding,
+        workflow_id=finding.workflow_id,
+        check_id=finding.check_id,
+        assertion_type=assertion_type,
+        priority=priority,
+        user_impact=finding.user_impact,
+        expected_behavior=finding.missing_expectation,
+        evidence=list(finding.evidence),
+    )
+    errors = candidate.validate()
+    if errors:
+        raise ValueError("; ".join(errors))
+    return candidate
 
 
 def render_posture_markdown(pack: PosturePack) -> str:

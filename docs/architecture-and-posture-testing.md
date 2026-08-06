@@ -92,6 +92,17 @@ utilitye2e-ai posture finding list --path /tmp/classhub-findings --automation-ca
 utilitye2e-ai posture finding list --path /tmp/classhub-findings --format json
 ```
 
+Automation-ready findings can be promoted into assertion candidate YAML:
+
+```bash
+utilitye2e-ai posture finding promote \
+  --finding-file /tmp/classhub-date-finding.yaml \
+  --priority high \
+  --output /tmp/classhub-date-assertion.yaml
+```
+
+Promotion uses the finding's `suggested_assertion` first, then `missing_expectation`, then falls back to the finding text. Findings must be marked as automation candidates unless the reviewer passes `--force`.
+
 ## Testing Model
 
 ### Layer 1: Automated Regression
@@ -192,6 +203,9 @@ Do not duplicate a product's auth flow. Product repos should expose login helper
 - `utilitye2e-ai posture finding create` records manual findings as YAML.
 - `application.list_posture_finding_records()` loads finding files/folders through the shared workflow layer.
 - `utilitye2e-ai posture finding list` summarizes findings as table, JSON, or YAML.
+- `core.posture.PostureAssertionCandidate` defines the promotion target for automation-ready findings.
+- `application.promote_posture_finding_record()` promotes a finding through the shared workflow layer.
+- `utilitye2e-ai posture finding promote` emits assertion candidate YAML.
 
 ### Now
 
@@ -203,7 +217,8 @@ Do not duplicate a product's auth flow. Product repos should expose login helper
 
 - Add optional JSON output for CI/report integration.
 - Add report fields for "manual finding", "converted assertion", and "automation candidate".
-- Add a `posture finding promote` command to scaffold suggested assertions.
+- Add assertion candidate listing and status tracking.
+- Add a first assertion-to-TestSpec scaffold for UI checks.
 
 ### Later
 

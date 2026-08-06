@@ -66,6 +66,11 @@ utilitye2e-ai posture finding create \
 
 # List recorded findings
 utilitye2e-ai posture finding list --path /tmp/classhub-findings
+
+# Promote an automation-ready finding into an assertion candidate
+utilitye2e-ai posture finding promote \
+  --finding-file /tmp/classhub-findings/image.yaml \
+  --priority high
 ```
 
 ## Web UI flow
@@ -182,6 +187,17 @@ utilitye2e-ai posture finding list --path /tmp/classhub-findings
 utilitye2e-ai posture finding list --path /tmp/classhub-findings --automation-candidates
 utilitye2e-ai posture finding list --path /tmp/classhub-findings --format json
 ```
+
+Automation-ready findings can be promoted into assertion candidate YAML:
+
+```bash
+utilitye2e-ai posture finding promote \
+  --finding-file /tmp/classhub-date-finding.yaml \
+  --priority high \
+  --output /tmp/classhub-date-assertion.yaml
+```
+
+Promotion uses `suggested_assertion` first, then `missing_expectation`, then falls back to the finding text. Findings must be marked as automation candidates unless `--force` is passed.
 
 ### Authentication boundary
 

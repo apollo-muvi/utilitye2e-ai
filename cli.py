@@ -22,6 +22,7 @@ from application.workflows import (
     build_analyzer,
     create_posture_finding_record,
     list_posture_finding_records,
+    promote_posture_finding_record,
     render_posture_pack,
     run_test_spec,
 )
@@ -116,6 +117,9 @@ def cmd_posture(args, config):
     if args.posture_command == "finding" and args.finding_command == "list":
         cmd_posture_finding_list(args, config)
         return
+    if args.posture_command == "finding" and args.finding_command == "promote":
+        cmd_posture_finding_promote(args, config)
+        return
     raise ValueError(f"Unsupported posture command: {args.posture_command}")
 
 
@@ -182,6 +186,23 @@ def cmd_posture_finding_list(args, config):
         )
         return
     print(render_findings_table(findings))
+
+
+def cmd_posture_finding_promote(args, config):
+    candidate = promote_posture_finding_record(
+        finding_path=args.finding_file,
+        assertion=args.assertion,
+        assertion_type=args.assertion_type,
+        priority=args.priority,
+        force=args.force,
+    )
+    output = candidate.to_yaml()
+    if args.output:
+        with open(args.output, "w", encoding="utf-8") as f:
+            f.write(output)
+        print(f"Posture assertion candidate saved to: {args.output}")
+        return
+    print(output, end="")
 
 
 def yaml_dump_all(rows):
@@ -286,6 +307,15 @@ def main():
         choices=["table", "json", "yaml"],
         default="table",
     )
+    p_finding_promote = finding_sub.add_parser(
+        "promote", help="Promote a finding into an assertion candidate"
+    )
+    p_finding_promote.add_argument("--finding-file", "-f", required=True)
+    p_finding_promote.add_argument("--assertion", default="")
+    p_finding_promote.add_argument("--assertion-type", default="ui")
+    p_finding_promote.add_argument("--priority", default="medium")
+    p_finding_promote.add_argument("--force", action="store_true")
+    p_finding_promote.add_argument("--output", "-o", default="")
     sub.add_parser("web", help="Start Web UI")
 
     # config file option on top-level

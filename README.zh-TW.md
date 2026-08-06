@@ -66,6 +66,11 @@ utilitye2e-ai posture finding create \
 
 # 列出已記錄 findings
 utilitye2e-ai posture finding list --path /tmp/classhub-findings
+
+# 將可自動化 finding 提升成 assertion candidate
+utilitye2e-ai posture finding promote \
+  --finding-file /tmp/classhub-findings/image.yaml \
+  --priority high
 ```
 
 ## Web UI 操作流程
@@ -182,6 +187,17 @@ utilitye2e-ai posture finding list --path /tmp/classhub-findings
 utilitye2e-ai posture finding list --path /tmp/classhub-findings --automation-candidates
 utilitye2e-ai posture finding list --path /tmp/classhub-findings --format json
 ```
+
+可自動化 findings 可以提升成 assertion candidate YAML：
+
+```bash
+utilitye2e-ai posture finding promote \
+  --finding-file /tmp/classhub-date-finding.yaml \
+  --priority high \
+  --output /tmp/classhub-date-assertion.yaml
+```
+
+Promotion 會優先使用 `suggested_assertion`，其次使用 `missing_expectation`，最後才回退到 finding 文字。Finding 必須標記為 automation candidate；若要強制轉換，可加 `--force`。
 
 ### 認證邊界
 

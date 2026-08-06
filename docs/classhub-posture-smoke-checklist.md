@@ -40,6 +40,15 @@ utilitye2e-ai posture finding list --path /tmp/classhub-findings
 utilitye2e-ai posture finding list --path /tmp/classhub-findings --automation-candidates
 ```
 
+Promote automation-ready finding:
+
+```bash
+utilitye2e-ai posture finding promote \
+  --finding-file /tmp/classhub-findings/image.yaml \
+  --priority high \
+  --output /tmp/classhub-findings/image-assertion.yaml
+```
+
 ## Review Rules
 
 - Test as a real role, not only as an admin.
