@@ -8,6 +8,7 @@ from .workflows import (
     create_posture_finding_record,
     derive_login_url,
     discover_page,
+    list_posture_finding_records,
     render_posture_pack,
     run_test_spec,
 )
@@ -20,6 +21,7 @@ __all__ = [
     "create_posture_finding_record",
     "derive_login_url",
     "discover_page",
+    "list_posture_finding_records",
     "render_posture_pack",
     "run_test_spec",
 ]

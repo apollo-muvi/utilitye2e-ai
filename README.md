@@ -63,6 +63,9 @@ utilitye2e-ai posture finding create \
   --check-id parent-image-multiple-browse \
   --finding "Image opens but cannot browse multiple attachments" \
   --impact "Parent cannot inspect every image from the detail view"
+
+# List recorded findings
+utilitye2e-ai posture finding list --path /tmp/classhub-findings
 ```
 
 ## Web UI flow
@@ -170,6 +173,14 @@ utilitye2e-ai posture finding create \
   --automation-candidate \
   --evidence screenshot-notification.png \
   --output /tmp/classhub-date-finding.yaml
+```
+
+Finding folders can be reviewed as a table or exported for downstream reporting:
+
+```bash
+utilitye2e-ai posture finding list --path /tmp/classhub-findings
+utilitye2e-ai posture finding list --path /tmp/classhub-findings --automation-candidates
+utilitye2e-ai posture finding list --path /tmp/classhub-findings --format json
 ```
 
 ### Authentication boundary

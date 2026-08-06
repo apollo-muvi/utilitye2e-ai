@@ -1,6 +1,10 @@
 import pytest
 
-from application.workflows import create_posture_finding_record, render_posture_pack
+from application.workflows import (
+    create_posture_finding_record,
+    list_posture_finding_records,
+    render_posture_pack,
+)
 from core.posture import (
     PosturePack,
     create_posture_finding,
@@ -128,6 +132,21 @@ def test_create_posture_finding_rejects_unknown_check_id():
         create_posture_finding(pack=pack, check_id="missing-check", finding="Bug")
 
 
+def test_create_posture_finding_rejects_mismatched_workflow_id():
+    pack = PosturePack.from_dict(_pack_dict())
+
+    with pytest.raises(
+        ValueError,
+        match="check id multi-image-browse belongs to workflow parent-images",
+    ):
+        create_posture_finding(
+            pack=pack,
+            workflow_id="other-workflow",
+            check_id="multi-image-browse",
+            finding="Bug",
+        )
+
+
 def test_create_posture_finding_record_loads_yaml_file(tmp_path):
     path = tmp_path / "pack.yaml"
     path.write_text(
@@ -154,3 +173,52 @@ workflows:
     assert finding.workflow_id == "smoke"
     assert finding.evidence == ["screenshot.png"]
     assert "suggested_assertion: Empty state" in finding.to_yaml()
+
+
+def test_list_posture_finding_records_loads_and_filters_directory(tmp_path):
+    open_finding = create_posture_finding(
+        pack=PosturePack.from_dict(_pack_dict()),
+        check_id="multi-image-browse",
+        finding="Image cannot browse multiple attachments.",
+    )
+    closed_finding = create_posture_finding(
+        pack=PosturePack.from_dict(_pack_dict()),
+        workflow_id="parent-images",
+        finding="Empty state is unclear.",
+        status="closed",
+        should_be_automated=False,
+    )
+    (tmp_path / "open.yaml").write_text(open_finding.to_yaml(), encoding="utf-8")
+    (tmp_path / "closed.yml").write_text(closed_finding.to_yaml(), encoding="utf-8")
+
+    findings = list_posture_finding_records(str(tmp_path))
+
+    assert [finding.finding for finding in findings] == [
+        "Empty state is unclear.",
+        "Image cannot browse multiple attachments.",
+    ]
+    assert [
+        finding.finding
+        for finding in list_posture_finding_records(str(tmp_path), status="open")
+    ] == ["Image cannot browse multiple attachments."]
+    assert [
+        finding.finding
+        for finding in list_posture_finding_records(
+            str(tmp_path), automation_candidates=True
+        )
+    ] == ["Image cannot browse multiple attachments."]
+
+
+def test_list_posture_finding_records_can_read_single_file(tmp_path):
+    finding = create_posture_finding(
+        pack=PosturePack.from_dict(_pack_dict()),
+        workflow_id="parent-images",
+        finding="Single file finding.",
+    )
+    path = tmp_path / "finding.yaml"
+    path.write_text(finding.to_yaml(), encoding="utf-8")
+
+    findings = list_posture_finding_records(str(path))
+
+    assert len(findings) == 1
+    assert findings[0].finding == "Single file finding."

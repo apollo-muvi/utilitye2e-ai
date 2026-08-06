@@ -2,6 +2,7 @@
 
 import asyncio
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlparse
 
@@ -212,3 +213,34 @@ def create_posture_finding_record(
         owner=owner,
         status=status,
     )
+
+
+def list_posture_finding_records(
+    path: str,
+    status: str = "",
+    automation_candidates: bool = False,
+    recursive: bool = False,
+) -> List[PostureFinding]:
+    """Load posture finding YAML records from a file or directory."""
+    root = Path(path)
+    if not root.exists():
+        raise FileNotFoundError(f"finding path does not exist: {path}")
+
+    if root.is_file():
+        files = [root]
+    else:
+        pattern = "**/*.y*ml" if recursive else "*.y*ml"
+        files = sorted(file for file in root.glob(pattern) if file.is_file())
+
+    findings = []
+    for file in files:
+        finding = PostureFinding.from_file(str(file))
+        errors = finding.validate()
+        if errors:
+            raise ValueError(f"{file}: {'; '.join(errors)}")
+        if status and finding.status != status:
+            continue
+        if automation_candidates and not finding.should_be_automated:
+            continue
+        findings.append(finding)
+    return findings
