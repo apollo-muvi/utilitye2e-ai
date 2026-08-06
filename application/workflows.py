@@ -3,7 +3,7 @@
 import asyncio
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 from adapters.llm import create_llm_adapter
@@ -189,19 +189,45 @@ def init_posture_pack(
     login_url: str = "",
     username: str = "",
     password: str = "",
-) -> PosturePack:
-    """Crawl a URL and auto-generate a starter posture pack."""
+) -> Tuple[PosturePack, List[str]]:
+    """Crawl a URL and auto-generate a starter posture pack.
+
+    Returns (pack, warnings) where warnings is a list of human-readable
+    advisory messages (e.g. auth may have failed, crawl was thin).
+    """
+    warnings: List[str] = []
     result = discover_page(
         target_url=url,
         login_url=login_url,
         username=username,
         password=password,
     )
-    return init_posture_pack_from_dom(
+
+    # detect thin crawl — likely auth failed or page requires interaction
+    nav_count = len(result.dom.get("navItems", []))
+    link_count = len(result.dom.get("links", []))
+    button_count = len(result.dom.get("buttons", []))
+    input_count = len(result.dom.get("inputs", []))
+    total_elements = nav_count + link_count + button_count + input_count
+
+    if total_elements <= 4:
+        warnings.append(
+            "Very few elements were found on this page. "
+            "The login may have failed or the page requires interaction "
+            "before content appears. Check your credentials and try again."
+        )
+    elif nav_count == 0 and link_count == 0:
+        warnings.append(
+            "No navigation items or links were found. "
+            "The crawl may be stuck on a login or landing page."
+        )
+
+    pack = init_posture_pack_from_dom(
         product=product,
         dom=result.dom,
         url=url,
     )
+    return pack, warnings
 
 
 def create_posture_finding_record(

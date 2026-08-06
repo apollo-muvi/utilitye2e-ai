@@ -2,6 +2,7 @@ import pytest
 
 from application.workflows import (
     create_posture_finding_record,
+    init_posture_pack,
     list_posture_finding_records,
     promote_posture_finding_record,
     render_posture_pack,
@@ -392,3 +393,54 @@ def test_init_posture_pack_no_duplicate_ids():
         all_ids.append(w.id)
         all_ids.extend(c.id for c in w.checks)
     assert len(all_ids) == len(set(all_ids)), f"duplicate IDs: {all_ids}"
+
+
+def test_init_posture_pack_thin_crawl_warning():
+    """init_posture_pack should warn when crawl yields very few elements."""
+    from application.workflows import init_posture_pack
+    from unittest.mock import patch
+
+    thin_dom = {
+        "buttons": [{"text": "Log in"}],
+        "inputs": [{"placeholder": "Username"}, {"placeholder": "Password"}],
+    }
+
+    with patch("application.workflows.discover_page") as mock_discover:
+        from application.workflows import DiscoveryResult
+        mock_discover.return_value = DiscoveryResult(
+            elements=[], title="Login", dom=thin_dom,
+        )
+        pack, warnings = init_posture_pack(
+            product="Router",
+            url="http://192.168.1.1",
+            username="admin",
+            password="admin",
+        )
+    assert len(warnings) > 0
+    assert any("few elements" in w.lower() or "login" in w.lower() for w in warnings)
+
+
+def test_init_posture_pack_rich_crawl_no_warning():
+    """init_posture_pack should NOT warn when crawl yields plenty of elements."""
+    from application.workflows import init_posture_pack
+    from unittest.mock import patch
+
+    rich_dom = {
+        "navItems": [{"text": "Dashboard"}, {"text": "Settings"}, {"text": "Profile"}],
+        "links": [{"text": "Help"}, {"text": "About"}],
+        "buttons": [{"text": "Save"}, {"text": "Cancel"}],
+        "inputs": [{"label": "Name"}, {"label": "Email"}],
+    }
+
+    with patch("application.workflows.discover_page") as mock_discover:
+        from application.workflows import DiscoveryResult
+        mock_discover.return_value = DiscoveryResult(
+            elements=[], title="Dashboard", dom=rich_dom,
+        )
+        pack, warnings = init_posture_pack(
+            product="App",
+            url="http://localhost:3001",
+            username="admin",
+            password="admin",
+        )
+    assert warnings == [], f"unexpected warnings: {warnings}"
